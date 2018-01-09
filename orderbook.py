@@ -1,14 +1,6 @@
 from datetime import datetime
-from pymongo import MongoClient
-from redis import Redis
 import uuid
 
-
-redis = Redis(host="localhost", port=6379, db=0)
-mongo = MongoClient(host="localhost")
-db = mongo.kex
-orders = db.orders
-trades = db.trades
 
 class Order(object):
 
@@ -22,25 +14,12 @@ class Order(object):
 		if self.type == "LIMIT":
 			self.price = quote["price"]
 		self.timestamp = datetime.now()
+		self.initial_quantity = quote["quantity"]
 		self.quantity = quote["quantity"]
 		self.trades = []
 
 	def update(self, quantity):
 		self.quantity = quantity
-
-	def save(self, price, status):
-		order = {
-			"order_id": self.order_id,
-			"account_id": self.account_id,
-			"side": self.side,
-			"type": self.type,
-			"symbol": self.symbol,
-			"price": price,
-			"ordered_at": self.timestamp,
-			"quantity": self.quantity,
-			"trades": [trade for trade in self.trades],
-		}
-		orders.insert_one(order)
 
 	def __repr__(self):
 		if self.price:
@@ -60,12 +39,9 @@ class Trade(object):
 		self.symbol = self.existing_order.symbol
 		self.quantity = quantity
 
-	def save(self):
-		pass
-
 	def __repr__(self):
-		return "{0} - {1} {2} @ {3}: Accounts {4} & {5}".format(
-			self.trade_id, self.quantity, self.symbol, self.price, self.existing_order.account_id, self.incoming_order.account_id
+		return "{0} {1} @ {2}: Accounts {3} & {4}".format(
+			self.quantity, self.symbol, self.price, self.existing_order.account_id, self.incoming_order.account_id
 		)
 
 class OrderList(object):
@@ -118,7 +94,6 @@ class OrderBook(object):
 		self.best_price = {"BUY": self.get_min_ask, "SELL": self.get_max_bid}
 		self.bid_volume = 0
 		self.ask_volume = 0
-		self.order_store = redis
 		
 	def get_max_bid(self):
 		max_bid = None
@@ -133,12 +108,13 @@ class OrderBook(object):
 		return min_ask
 
 	def process_order(self, quote):
+		self.completed_orders = {}
+		self.completed_trades = {}
+		order = None
 		if quote["symbol"] == self.symbol:
 			order = Order(quote)
-			self.order_store.set(order.order_id, order)
 			self._direct_order(order)
 		else:
-			order = None
 			print("OrderError: Symbol not correct for this order book")
 		return order
 
@@ -147,7 +123,6 @@ class OrderBook(object):
 			if not order.trades:
 				self.side_mapping[order.side][order.price].remove_order(order)
 				self._remove_empty_order_lists()
-				self.order_store.delete(order.order_id)
 			else:
 				print("OrderError: Order has already been partially filled.")
 		else:
@@ -158,7 +133,6 @@ class OrderBook(object):
 			if not order.trades:
 				self.cancel_order(order)
 				new_order = self.process_order(quote)
-				self.order_store.set(new_order.order_id, new_order)
 			else:
 				new_order = order
 				print("OrderError: Order has already been partially filled")
@@ -213,22 +187,21 @@ class OrderBook(object):
 		for existing_order in order_list.orders:
 			if order.quantity > 0:
 				remainder = existing_order.quantity - order.quantity
-				if remainder > 0:
+				if remainder >= 0:
 					trade = Trade(existing_order, order, order.quantity)
-					trade.save()
 					existing_order.update(remainder)
 					order_list.remove_partial(order.quantity)
 					order.update(0)
+					self.completed_orders[order.order_id] = order
 				else:
 					trade = Trade(existing_order, order, existing_order.quantity)
-					trade.save()
 					existing_order.update(0)
 					fulfilled_orders.append(existing_order)
 					order.update(abs(remainder))
+					self.completed_orders[existing_order.order_id] = existing_order
 				order.trades.append(trade)
-				self.order_store.set(order.order_id, order)
 				existing_order.trades.append(trade)
-				self.order_store.set(existing_order.order_id, existing_order)
+				self.completed_trades[trade.trade_id] = trade
 		for orders in fulfilled_orders:
 			order_list.remove_order(orders)
 		self._remove_empty_order_lists()
@@ -253,3 +226,5 @@ class OrderBook(object):
 
 	def __repr__(self):
 		return "BIDS: {0}\nASKS: {1}".format(self.bids, self.asks)
+
+#TODO - Change printed errors to exceptions

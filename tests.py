@@ -41,7 +41,7 @@ test_quote5 = {
 	"type": "LIMIT",
 	"symbol": "KEQ",
 	"price": 101.00,
-	"quantity": 150,
+	"quantity": 100,
 }
 test_quote6 = {
 	"account_id": "6",
@@ -166,16 +166,11 @@ class test_order_book(unittest.TestCase):
 	def setUp(self):
 		test_quotes = [test_quote1, test_quote2, test_quote3, test_quote4, test_quote5, test_quote6, test_quote7, test_quote8]
 		self.order_book = OrderBook("KEQ")
-		for keys in self.order_book.order_store.keys(): self.order_book.order_store.delete(keys)
 		for i in range(0, len(test_quotes)):
 			order = self.order_book.process_order(test_quotes[i])
-			print(self.order_book)
-		new_order = self.order_book.modify_order(order, test_quote14)
-		self.order_book.cancel_order(new_order)
 		
 	def test_process_order(self):
 		print(self.order_book)
-		print(sorted(self.order_book.order_store.keys()))
 
 if __name__=="__main__":
     unittest.main()
