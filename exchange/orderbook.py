@@ -129,26 +129,24 @@ class OrderBook(object):
 			print("OrderError: No order entered for cancellation.")
 
 	def modify_order(self, order, quote):
+		new_order = order
 		if order:
 			if not order.trades:
 				self.cancel_order(order)
 				new_order = self.process_order(quote)
 			else:
-				new_order = order
 				print("OrderError: Order has already been partially filled")
 		else:
-			new_order = None
 			print("OrderError: No order entered for modification.")
 		return new_order
 
 	def _direct_order(self, order):
 		self.bid_volume = sum([order_list.volume for key, order_list in self.bids.iteritems()])
 		self.ask_volume = sum([order_list.volume for key, order_list in self.asks.iteritems()])
-		best_price = self.best_price[order.side]()
 		if order.type == "MARKET":
-			self._process_market_order(order, best_price)
+			self._process_market_order(order, self.best_price[order.side]())
 		else:
-			self._process_limit_order(order, best_price)
+			self._process_limit_order(order, self.best_price[order.side]())
 
 	def _process_market_order(self, order, best_price):
 		order_list = None
@@ -158,8 +156,8 @@ class OrderBook(object):
 		else:
 			if self.bid_volume > order.quantity:
 				order_list = self.bids[best_price]
-		order.price = best_price
 		if best_price and order_list:
+			order.price = best_price
 			self._process_trades(order, order_list, best_price)
 		else:
 			print("MarketError: Can not process market order without market")
@@ -178,7 +176,6 @@ class OrderBook(object):
 					self._process_trades(order, order_list, best_price)
 				else:
 					self._update_order_book(order)
-
 		else:
 			self._update_order_book(order)
 
