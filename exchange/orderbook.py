@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 import uuid
 
 
@@ -17,6 +18,21 @@ class Order(object):
         self.initial_quantity = quote["quantity"]
         self.quantity = quote["quantity"]
         self.trades = []
+
+    def json(self):
+        response = {
+            "order_id": self.order_id,
+            "account_id": self.account_id,
+            "side": self.side,
+            "type": self.type,
+            "symbol": self.symbol,
+            "price": self.price,
+            "timestamp": str(self.timestamp),
+            "initial_quantity": self.initial_quantity,
+            "quantity": self.quantity,
+            "trades": str(self.trades)
+        }
+        return json.dumps(response)
 
     def update(self, quantity):
         self.quantity = quantity
@@ -116,27 +132,38 @@ class OrderBook(object):
         order = None
         if quote["symbol"] == self.symbol:
             order = Order(quote)
-            self.ongoing_orders[order.order_id] = order
+            self.ongoing_orders[order.order_id] = order.json()
             self._direct_order(order)
         else:
             raise OrderError("Symbol not correct for this order book")
-        return order
+        return order.json()
 
-    def cancel_order(self, order):
-        if order:
+    def cancel_order(self, order_id):
+        if order_id in self.ongoing_orders.keys():
+            order = None
+            order_json = json.loads(self.ongoing_orders[order_id])
+            order_list = self.side_mapping[str(order_json["side"])][order_json["price"]]
+            for orders in order_list.orders:
+                if orders.order_id == order_id:
+                    order = orders
             if not order.trades:
                 self.side_mapping[order.side][order.price].remove_order(order)
                 self._remove_empty_order_lists()
             else:
                 raise OrderError("Order has already been partially filled.")
         else:
-            raise OrderError("No order entered for cancellation.")
+            raise OrderError("No order with that order ID currently exists.")
 
-    def modify_order(self, order, quote):
-        new_order = order
-        if order:
+    def modify_order(self, order_id, quote):
+        if order_id in self.ongoing_orders.keys():
+            order = None
+            order_json = json.loads(self.ongoing_orders[order_id])
+            order_list = self.side_mapping[str(order_json["side"])][order_json["price"]]
+            for orders in order_list.orders:
+                if orders.order_id == order_id:
+                    order = orders
             if not order.trades:
-                self.cancel_order(order)
+                self.cancel_order(order.order_id)
                 new_order = self.process_order(quote)
             else:
                 raise OrderError("Order has already been partially filled")
@@ -194,8 +221,8 @@ class OrderBook(object):
                     order_list.remove_partial(order.quantity)
                     order.update(0)
                     del self.ongoing_orders[order.order_id]
-                    self.ongoing_orders[existing_order.order_id] = existing_order
-                    self.completed_orders[order.order_id] = order
+                    self.ongoing_orders[existing_order.order_id] = existing_order.json()
+                    self.completed_orders[order.order_id] = order.json()
                 elif remainder == 0:
                     trade = Trade(existing_order, order, order.quantity)
                     existing_order.update(0)
@@ -203,18 +230,18 @@ class OrderBook(object):
                     order.update(0)
                     del self.ongoing_orders[order.order_id]
                     del self.ongoing_orders[existing_order.order_id]
-                    self.completed_orders[order.order_id] = order
-                    self.completed_orders[existing_order.order_id] = existing_order
+                    self.completed_orders[order.order_id] = order.json()
+                    self.completed_orders[existing_order.order_id] = existing_order.json()
                 else:
                     trade = Trade(existing_order, order, existing_order.quantity)
                     existing_order.update(0)
                     fulfilled_orders.append(existing_order)
                     order.update(abs(remainder))
                     del self.ongoing_orders[existing_order.order_id]
-                    self.ongoing_orders[order.order_id] = order
-                    self.completed_orders[existing_order.order_id] = existing_order
-                order.trades.append(trade)
-                existing_order.trades.append(trade)
+                    self.ongoing_orders[order.order_id] = order.json()
+                    self.completed_orders[existing_order.order_id] = existing_order.json()
+                order.trades.append(trade.trade_id)
+                existing_order.trades.append(trade.trade_id)
                 self.completed_trades[trade.trade_id] = trade
         for orders in fulfilled_orders:
             order_list.remove_order(orders)

@@ -4,6 +4,7 @@ from flask import Flask, request
 from redis import Redis, RedisError
 
 from orderbook import OrderBook
+from orderbook import OrderError, PriceError, MarketError
 
 
 STOCK_SYMBOL = "KEQ"
@@ -29,29 +30,81 @@ def check():
 @app.route("/process_trade", methods=["POST"])
 def process():
     quote = request.get_json()
-    valid, errors = _check_quote(quote)
-    if valid:
-        order = orderbook.process_order(quote)
-        redis.set(order.order_id, order)
-        for ids, orders in orderbook.ongoing_orders.iteritems():
-            redis.set(ids, orders)
-        for orders in orderbook.completed_orders.keys():
-            redis.delete(orders)
     current_time = str(datetime.now())
+    valid, errors = _check_quote(quote)
     response = {
         "time": current_time,
     }
-    response["redis"] = redis.keys()
-    response["book"] = str(orderbook)
+    if valid:
+        try:
+            order = json.loads(orderbook.process_order(quote))
+            response["order_id"] = order["order_id"]
+            response["filled"] = True
+            response["quote"] = quote
+            try:
+                redis.set(order["order_id"], json.dumps(order))
+                for ids, orders in orderbook.ongoing_orders.iteritems():
+                    redis.set(ids, orders)
+                for orders in orderbook.completed_orders.keys():
+                    redis.delete(orders)
+            except RedisError as err:
+                errors.append(err)
+                pass
+            if order["order_id"] in redis.keys():
+                response["filled"] = False
+        except OrderError as err:
+            errors.append({"ORDER_ERROR": err.message})
+            pass
+        except MarketError as err:
+            errors.append({"MARKET_ERROR": err.message})
+            pass
+        except PriceError as err:
+            errors.append({"PRICE_ERROR": err.message})
+            pass
+    if errors:
+        response["errors"] = errors
     return json.dumps(response)
 
-@app.route("/modify_trade", methods=["POST"])
-def modify(order_id, quote):
+@app.route("/modify_trade/<order_id>", methods=["POST"])
+def modify(order_id):
     order = redis.get(order_id)
-    try:
-        new_order = orderbook.modify_order(order, quote)
-    except Exception as err:
-        pass
+    print(json.loads(order))
+    quote = request.get_json()
+    current_time = str(datetime.now())
+    valid, errors = _check_quote(quote)
+    response = {
+        "time": current_time,
+    }
+    if valid:
+        try:
+            new_order = json.loads(orderbook.modify_order(order, quote))
+            response["order_id"] = order["order_id"]
+            response["filled"] = True
+            response["quote"] = quote
+            try:
+                redis.delete(order["order_id"])
+                redis.set(new_order["order_id"], json.dumps(new_order))
+                for ids, orders in orderbook.ongoing_orders.iteritems():
+                    redis.set(ids, orders)
+                for orders in orderbook.completed_orders.keys():
+                    redis.delete(orders)
+            except RedisError as err:
+                errors.append(err)
+                pass
+            if new_order["order_id"] in redis.keys():
+                response["filled"] = False
+        except OrderError as err:
+            errors.append({"ORDER_ERROR": err.message})
+            pass
+        except MarketError as err:
+            errors.append({"MARKET_ERROR": err.message})
+            pass
+        except PriceError as err:
+            errors.append({"PRICE_ERROR": err.message})
+            pass
+        if errors:
+            response["errors"] = errors
+        return json.dumps(response)
 
 @app.route("/cancel_trade", methods=["POST"])
 def cancel(order_id):

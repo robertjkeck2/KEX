@@ -63,7 +63,7 @@ class test_order_book(unittest.TestCase):
 		self.orders = []
 		self.order_book = OrderBook("KEQ")
 		for i in range(1, 10):
-			order = self.order_book.process_order(test_quotes[str(i)])
+			order = json.loads(self.order_book.process_order(test_quotes[str(i)]))
 			self.orders.append(order)
 			for trades in self.order_book.completed_trades:
 				self.completed_trades.append(trades)
@@ -84,12 +84,13 @@ class test_order_book(unittest.TestCase):
 		self.assertEqual(len(self.completed_orders), 6)
 
 	def test_modify_order(self):
-		new_order = self.order_book.modify_order(self.orders[8], test_quotes[str(10)])
-		self.assertEqual(new_order.price, 100)
+		new_order = json.loads(self.order_book.modify_order(self.orders[8]["order_id"], test_quotes[str(10)]))
+		self.assertEqual(new_order["price"], 75)
 
 	def test_cancel_order(self):
-		self.order_book.cancel_order(self.orders[8])
-		self.assertEqual(len(self.order_book.bids.keys()), 0)
+		new_order = json.loads(self.order_book.process_order(test_quotes[str(10)]))
+		self.order_book.cancel_order(new_order["order_id"])
+		self.assertEqual(len(self.order_book.bids.keys()), 1)
 
 if __name__=="__main__":
     unittest.main()
