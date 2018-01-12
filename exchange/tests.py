@@ -80,6 +80,7 @@ class test_order_book(unittest.TestCase):
 		self.assertEqual(len(self.order_book.bids.keys()), 1)
 		self.assertEqual(len(self.order_book.asks.keys()), 2)
 		self.assertEqual(len(self.completed_trades), 6)
+		self.assertEqual(len(self.order_book.ongoing_orders), 3)
 		self.assertEqual(len(self.completed_orders), 6)
 
 	def test_modify_order(self):
