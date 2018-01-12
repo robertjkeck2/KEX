@@ -139,13 +139,8 @@ class OrderBook(object):
         return order.json()
 
     def cancel_order(self, order_id):
-        if order_id in self.ongoing_orders.keys():
-            order = None
-            order_json = json.loads(self.ongoing_orders[order_id])
-            order_list = self.side_mapping[str(order_json["side"])][order_json["price"]]
-            for orders in order_list.orders:
-                if orders.order_id == order_id:
-                    order = orders
+        order = self._get_order_by_id(order_id)
+        if order:
             if not order.trades:
                 self.side_mapping[order.side][order.price].remove_order(order)
                 self._remove_empty_order_lists()
@@ -155,13 +150,8 @@ class OrderBook(object):
             raise OrderError("No order with that order ID currently exists.")
 
     def modify_order(self, order_id, quote):
-        if order_id in self.ongoing_orders.keys():
-            order = None
-            order_json = json.loads(self.ongoing_orders[order_id])
-            order_list = self.side_mapping[str(order_json["side"])][order_json["price"]]
-            for orders in order_list.orders:
-                if orders.order_id == order_id:
-                    order = orders
+        order = self._get_order_by_id(order_id)
+        if order:
             if not order.trades:
                 self.cancel_order(order.order_id)
                 new_order = self.process_order(quote)
@@ -170,6 +160,16 @@ class OrderBook(object):
         else:
             raise OrderError("No order entered for modification.")
         return new_order
+
+    def _get_order_by_id(self, order_id):
+        order = None
+        if order_id in self.ongoing_orders.keys():
+            order_json = json.loads(self.ongoing_orders[order_id])
+            order_list = self.side_mapping[str(order_json["side"])][order_json["price"]]
+            for orders in order_list.orders:
+                if orders.order_id == order_id:
+                    order = orders
+        return order
 
     def _direct_order(self, order):
         self.bid_volume = sum([order_list.volume for key, order_list in self.bids.iteritems()])
