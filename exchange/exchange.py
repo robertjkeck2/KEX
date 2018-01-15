@@ -43,7 +43,7 @@ def process():
             response["quote"] = quote
             try:
                 redis.set(order["order_id"], json.dumps(order))
-                for ids, orders in orderbook.ongoing_orders.iteritems():
+                for ids, orders in orderbook.ongoing_orders.items():
                     redis.set(ids, orders)
                 for orders in orderbook.completed_orders.keys():
                     redis.delete(orders)
@@ -84,7 +84,7 @@ def modify(order_id):
             try:
                 redis.delete(order["order_id"])
                 redis.set(new_order["order_id"], json.dumps(new_order))
-                for ids, orders in orderbook.ongoing_orders.iteritems():
+                for ids, orders in orderbook.ongoing_orders.items():
                     redis.set(ids, orders)
                 for orders in orderbook.completed_orders.keys():
                     redis.delete(orders)

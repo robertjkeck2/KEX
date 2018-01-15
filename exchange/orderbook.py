@@ -38,10 +38,9 @@ class Order(object):
         self.quantity = quantity
 
     def __repr__(self):
+        order_string = f"{self.side} - {self.quantity} {self.symbol} @ MARKET"
         if self.price:
-            order_string = "{0} - {1} {2} @ {3}".format(self.side, self.quantity, self.symbol, self.price)
-        else:
-            order_string = "{0} - {1} {2} @ MARKET".format(self.side, self.quantity, self.symbol)
+            order_string = f"{self.side} - {self.quantity} {self.symbol} @ {self.price}"
         return order_string
 
 class Trade(object):
@@ -56,9 +55,9 @@ class Trade(object):
         self.quantity = quantity
 
     def __repr__(self):
-        return "{0} {1} @ {2}: Accounts {3} & {4}".format(
-            self.quantity, self.symbol, self.price, self.existing_order.account_id, self.incoming_order.account_id
-        )
+        sender = self.existing_order.account_id
+        receiver = self.incoming_order.account_id
+        return f"{self.quantity} {self.symbol} @ {self.price}: Accounts {sender} & {receiver}"
 
 class OrderList(object):
 
@@ -85,7 +84,7 @@ class OrderList(object):
             self.length += 1
             self.sort_orders()
         else:
-            raise PriceError("Incorrect order list for order price")
+            raise PriceError("Incorrect order list for order price.")
 
     def remove_order(self, order):
         found = False
@@ -97,7 +96,7 @@ class OrderList(object):
                 self.sort_orders()
                 found = True
         if not found:
-            raise OrderError("This order does not exist in the order list")
+            raise OrderError("This order does not exist in the order list.")
 
     def __repr__(self):
         return str(self.orders)
@@ -110,6 +109,7 @@ class OrderBook(object):
         self.asks = {}
         self.side_mapping = {"BUY": self.bids, "SELL": self.asks}
         self.best_price = {"BUY": self.get_min_ask, "SELL": self.get_max_bid}
+        self.type_mapping = {"MARKET": self._process_market_order, "LIMIT": self._process_limit_order}
         self.bid_volume = 0
         self.ask_volume = 0
         self.ongoing_orders = {}
@@ -135,30 +135,24 @@ class OrderBook(object):
             self.ongoing_orders[order.order_id] = order.json()
             self._direct_order(order)
         else:
-            raise OrderError("Symbol not correct for this order book")
+            raise OrderError("Symbol not correct for this order book.")
         return order.json()
 
     def cancel_order(self, order_id):
         order = self._get_order_by_id(order_id)
-        if order:
-            if not order.trades:
-                self.side_mapping[order.side][order.price].remove_order(order)
-                self._remove_empty_order_lists()
-            else:
-                raise OrderError("Order has already been partially filled.")
+        if order.trades:
+            raise OrderError("Order has already been partially filled.")
         else:
-            raise OrderError("No order with that order ID currently exists.")
+            self.side_mapping[order.side][order.price].remove_order(order)
+            self._remove_empty_order_lists()            
 
     def modify_order(self, order_id, quote):
         order = self._get_order_by_id(order_id)
-        if order:
-            if not order.trades:
-                self.cancel_order(order.order_id)
-                new_order = self.process_order(quote)
-            else:
-                raise OrderError("Order has already been partially filled")
+        if order.trades:
+            raise OrderError("Order has already been partially filled.")
         else:
-            raise OrderError("No order entered for modification.")
+            self.cancel_order(order.order_id)
+            new_order = self.process_order(quote)            
         return new_order
 
     def _get_order_by_id(self, order_id):
@@ -169,44 +163,39 @@ class OrderBook(object):
             for orders in order_list.orders:
                 if orders.order_id == order_id:
                     order = orders
+        if not order:
+            raise OrderError("No order with that order ID currently exists.")
         return order
 
     def _direct_order(self, order):
-        self.bid_volume = sum([order_list.volume for key, order_list in self.bids.iteritems()])
-        self.ask_volume = sum([order_list.volume for key, order_list in self.asks.iteritems()])
-        if order.type == "MARKET":
-            self._process_market_order(order, self.best_price[order.side]())
-        else:
-            self._process_limit_order(order, self.best_price[order.side]())
+        self.bid_volume = sum([order_list.volume for order_list in self.bids.values()])
+        self.ask_volume = sum([order_list.volume for order_list in self.asks.values()])
+        self.type_mapping[order.type](order, self.best_price[order.side]())
 
     def _process_market_order(self, order, best_price):
         order_list = None
         if order.side == "BUY":
             if self.ask_volume > order.quantity:
                 order_list = self.asks[best_price]
-        else:
+        elif order.side == "SELL":
             if self.bid_volume > order.quantity:
                 order_list = self.bids[best_price]
         if best_price and order_list:
             order.price = best_price
             self._process_trades(order, order_list, best_price)
         else:
-            raise MarketError("Can not process market order without market")
+            raise MarketError("Can not process market order without market.")
 
     def _process_limit_order(self, order, best_price):
         if best_price:
-            if order.side == "BUY":
-                if order.price >= best_price:
-                    order_list = self.asks[best_price]
-                    self._process_trades(order, order_list, best_price)
-                else:
-                    self._update_order_book(order)
+            if order.side == "BUY" and order.price >= best_price:
+                order_list = self.asks[best_price]
+                self._process_trades(order, order_list, best_price)
+            elif order.side == "SELL" and order.price <= best_price:
+                order_list = self.bids[best_price]
+                self._process_trades(order, order_list, best_price)
             else:
-                if order.price <= best_price:
-                    order_list = self.bids[best_price]
-                    self._process_trades(order, order_list, best_price)
-                else:
-                    self._update_order_book(order)
+                self._update_order_book(order)
         else:
             self._update_order_book(order)
 
@@ -250,23 +239,22 @@ class OrderBook(object):
             self._direct_order(order)
 
     def _remove_empty_order_lists(self):
-        empty_asks = [key for key, value in self.asks.iteritems() if not value]
-        empty_bids = [key for key, value in self.bids.iteritems() if not value]
+        empty_asks = [key for key, value in self.asks.items() if not value]
+        empty_bids = [key for key, value in self.bids.items() if not value]
         for asks in empty_asks:
             del self.asks[asks]
         for bids in empty_bids:
             del self.bids[bids]
 
     def _update_order_book(self, order):
+        order_list = OrderList(order.side, order.price)
         if order.price in self.bids or order.price in self.asks:
             order_list = self.side_mapping[order.side][order.price]
-        else:
-            order_list = OrderList(order.side, order.price)
         order_list.add_order(order)
         self.side_mapping[order.side][order.price] = order_list
 
     def __repr__(self):
-        return "BIDS: {0}\nASKS: {1}".format(self.bids, self.asks)
+        return f"BIDS: {self.bids}\nASKS: {self.asks}"
 
 class Error(Exception):
     pass
