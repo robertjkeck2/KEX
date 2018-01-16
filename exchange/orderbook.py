@@ -144,6 +144,7 @@ class OrderBook(object):
             raise OrderError("Order has already been partially filled.")
         else:
             self.side_mapping[order.side][order.price].remove_order(order)
+            del self.ongoing_orders[order.order_id]
             self._remove_empty_order_lists()            
 
     def modify_order(self, order_id, quote):
@@ -157,7 +158,7 @@ class OrderBook(object):
 
     def _get_order_by_id(self, order_id):
         order = None
-        if order_id in self.ongoing_orders.keys():
+        if str(order_id) in list(self.ongoing_orders.keys()):
             order_json = json.loads(self.ongoing_orders[order_id])
             order_list = self.side_mapping[str(order_json["side"])][order_json["price"]]
             for orders in order_list.orders:
