@@ -1,6 +1,11 @@
 from datetime import datetime
 import json
+from os import path
+import pickle
+
+from bson.binary import Binary
 from flask import Flask, request
+from pymongo import MongoClient
 from redis import StrictRedis, RedisError
 
 from orderbook import OrderBook
@@ -8,12 +13,12 @@ from orderbook import OrderError, PriceError, MarketError
 
 
 STOCK_SYMBOL = "KEQ"
+ORDERBOOK_FILE = 'orderbook.pickle'
 
 app = Flask(__name__)
 redis = StrictRedis(host="localhost", port=6379, db=0, charset="utf-8", decode_responses=True)
-[redis.delete(key) for key in redis.keys()]
-
-orderbook = OrderBook(STOCK_SYMBOL)
+mongo = MongoClient(host="localhost")
+db = mongo.exchange_db
 
 @app.route("/v1/quote/verify", methods=["POST"])
 def check():
@@ -35,10 +40,12 @@ def process():
     if valid:
         try:
             order = json.loads(orderbook.process_order(quote))
-            response["order"] = order
-            response["was_placed"] = True
-            response["was_filled"] = False
-            response["quote"] = quote
+            _backup_orderbook(orderbook)
+            order["was_placed"] = True
+            order["was_filled"] = False
+            order["was_cancelled"] = False
+            saved_order = db.orders.insert_one(order)
+            order["_id"] = str(order["_id"])
             try:
                 redis.set(order["order_id"], json.dumps(order))
                 _update_redis()
@@ -46,7 +53,8 @@ def process():
                 errors.append({"REDIS_ERROR": str(err)})
                 pass
             if order["order_id"] not in str(redis.keys()):
-                response["was_filled"] = True
+                order["was_filled"] = True
+            response["order"] = order
         except OrderError as err:
             errors.append({"ORDER_ERROR": str(err)})
             pass
@@ -81,10 +89,10 @@ def modify():
     if valid:
         try:
             new_order = json.loads(orderbook.modify_order(order_id, quote))
-            response["order"] = new_order
-            response["was_placed"] = True
-            response["was_filled"] = False
-            response["quote"] = quote
+            _backup_orderbook(orderbook)
+            new_order["was_placed"] = True
+            new_order["was_filled"] = False
+            new_order["was_cancelled"] = False
             try:
                 redis.delete(order_id)
                 redis.set(new_order["order_id"], json.dumps(new_order))
@@ -93,7 +101,8 @@ def modify():
                 errors.append({"REDIS_ERROR": str(err)})
                 pass
             if new_order["order_id"] not in str(redis.keys()):
-                response["filled"] = True
+                new_order["filled"] = True
+            response["order"] = new_order
         except OrderError as err:
             errors.append({"ORDER_ERROR": str(err)})
             pass
@@ -114,6 +123,7 @@ def cancel():
     response = {}
     try:
         orderbook.cancel_order(order_id)
+        _backup_orderbook(orderbook)
         response["order_id"] = order_id
         response["was_cancelled"] = False
         current_time = str(datetime.now())
@@ -175,11 +185,28 @@ def _check_quote(quote):
         valid = True
     return valid, errors
 
+def _setup_databases():
+    [redis.delete(key) for key in redis.keys()] 
+    if path.isfile(ORDERBOOK_FILE):
+        with open(ORDERBOOK_FILE, 'rb') as f:
+            orderbook = pickle.load(f)
+    else:
+        orderbook = OrderBook(STOCK_SYMBOL)
+    return orderbook
+
 def _update_redis():
     for ids, orders in orderbook.ongoing_orders.items():
         redis.set(ids, orders)
     for orders in orderbook.completed_orders.keys():
         redis.delete(orders)
 
+def _backup_orderbook(orderbook):
+    with open(ORDERBOOK_FILE, 'wb') as f:
+        pickle.dump(orderbook, f)
+    orderbook_string = pickle.dumps(orderbook)
+    db.orderbook.replace_one({'orderbook_id': 1}, {'orderbook_id': 1, 'orderbook': Binary(orderbook_string)}, upsert=True)
+
 if __name__ == "__main__":
+    orderbook = _setup_databases()
+    _update_redis()
     app.run(host='0.0.0.0', port=5000, debug=True)
