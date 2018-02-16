@@ -1,0 +1,11 @@
+click==6.7
+Django==2.0.2
+djangorestframework==3.7.7
+Flask==0.12.2
+itsdangerous==0.24
+Jinja2==2.10
+MarkupSafe==1.0
+pymongo==3.6.0
+pytz==2018.3
+redis==2.10.6
+Werkzeug==0.14.1
