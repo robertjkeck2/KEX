@@ -54,6 +54,24 @@ class Trade(object):
         self.symbol = self.existing_order.symbol
         self.quantity = quantity
 
+    def json(self):
+        response = {
+            "trade_id": self.trade_id,
+            "buyer": self.existing_order.order_id,
+            "seller": self.incoming_order.order_id,
+            "symbol": self.symbol,
+            "price": self.price,
+            "timestamp": str(self.timestamp),
+            "quantity": self.quantity
+        }
+        if self.existing_order.side == "BUY":
+            response["buyer"] = self.existing_order.order_id
+            response["seller"] = self.incoming_order.order_id
+        else:
+            response["buyer"] = self.incoming_order.order_id
+            response["seller"] = self.existing_order.order_id
+        return json.dumps(response)
+
     def __repr__(self):
         sender = self.existing_order.account_id
         receiver = self.incoming_order.account_id
@@ -176,10 +194,10 @@ class OrderBook(object):
     def _process_market_order(self, order, best_price):
         order_list = None
         if order.side == "BUY":
-            if self.ask_volume > order.quantity:
+            if self.ask_volume >= order.quantity:
                 order_list = self.asks[best_price]
         elif order.side == "SELL":
-            if self.bid_volume > order.quantity:
+            if self.bid_volume >= order.quantity:
                 order_list = self.bids[best_price]
         if best_price and order_list:
             order.price = best_price
@@ -210,6 +228,8 @@ class OrderBook(object):
                     existing_order.update(remainder)
                     order_list.remove_partial(order.quantity)
                     order.update(0)
+                    order.trades.append(trade.trade_id)
+                    existing_order.trades.append(trade.trade_id)
                     del self.ongoing_orders[order.order_id]
                     self.ongoing_orders[existing_order.order_id] = existing_order.json()
                     self.completed_orders[order.order_id] = order.json()
@@ -218,6 +238,8 @@ class OrderBook(object):
                     existing_order.update(0)
                     fulfilled_orders.append(existing_order)
                     order.update(0)
+                    order.trades.append(trade.trade_id)
+                    existing_order.trades.append(trade.trade_id)
                     del self.ongoing_orders[order.order_id]
                     del self.ongoing_orders[existing_order.order_id]
                     self.completed_orders[order.order_id] = order.json()
@@ -227,12 +249,12 @@ class OrderBook(object):
                     existing_order.update(0)
                     fulfilled_orders.append(existing_order)
                     order.update(abs(remainder))
+                    order.trades.append(trade.trade_id)
+                    existing_order.trades.append(trade.trade_id)
                     del self.ongoing_orders[existing_order.order_id]
                     self.ongoing_orders[order.order_id] = order.json()
                     self.completed_orders[existing_order.order_id] = existing_order.json()
-                order.trades.append(trade.trade_id)
-                existing_order.trades.append(trade.trade_id)
-                self.completed_trades[trade.trade_id] = trade
+                self.completed_trades[trade.trade_id] = trade.json()
         for orders in fulfilled_orders:
             order_list.remove_order(orders)
         self._remove_empty_order_lists()

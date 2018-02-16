@@ -44,8 +44,6 @@ def process():
             order["was_placed"] = True
             order["was_filled"] = False
             order["was_cancelled"] = False
-            saved_order = db.orders.insert_one(order)
-            order["_id"] = str(order["_id"])
             try:
                 redis.set(order["order_id"], json.dumps(order))
                 _update_redis()
@@ -73,11 +71,17 @@ def status():
     order_id = request.get_json()["order_id"]
     response = {}
     if order_id not in str(redis.keys()):
-        response["was_filled"] = True
+        order_store = db.orders.find({'order_id': order_id}, {"_id": 0}).limit(1)
+        if order_store.count() > 0:
+            order = order_store[0]
+            response["was_filled"] = True
+        else:
+            order = {}
+            response["errors"] = [{"ORDER_ERROR": "No order with that order ID currently exists."}]
     else:
         order = json.loads(redis.get(order_id))
-        response["order"] = order
         response["was_filled"] = False
+    response["order"] = order
     return json.dumps(response)
 
 @app.route("/v1/order/edit", methods=["POST"])
@@ -177,7 +181,7 @@ def _check_quote(quote):
         errors.append({"TYPE_ERROR": "Incorrect LIMIT/MARKET side format."})
     if quote["symbol"] != STOCK_SYMBOL:
         errors.append({"SYMBOL_ERROR": "Incorrect stock symbol for this exchange."})
-    if quote["price"] <= 0:
+    if quote["type"] == "LIMIT" and quote["price"] <= 0:
         errors.append({"PRICE_ERROR": "Price must be greater than 0."})
     if quote["quantity"] <= 0:
         errors.append({"QUANTITY_ERROR": "Quantity must be greater than 0."})
@@ -185,11 +189,14 @@ def _check_quote(quote):
         valid = True
     return valid, errors
 
-def _setup_databases():
+def _setup_orderbook():
     [redis.delete(key) for key in redis.keys()] 
+    orderbook_store = db.orderbook.find({'orderbook_id': 1}).limit(1)
     if path.isfile(ORDERBOOK_FILE):
         with open(ORDERBOOK_FILE, 'rb') as f:
             orderbook = pickle.load(f)
+    elif orderbook_store.count() > 0:
+        orderbook = pickle.loads(orderbook_store[0]["orderbook"])
     else:
         orderbook = OrderBook(STOCK_SYMBOL)
     return orderbook
@@ -197,8 +204,13 @@ def _setup_databases():
 def _update_redis():
     for ids, orders in orderbook.ongoing_orders.items():
         redis.set(ids, orders)
-    for orders in orderbook.completed_orders.keys():
-        redis.delete(orders)
+    if hasattr(orderbook, 'completed_orders'):
+        for ids, orders in orderbook.completed_orders.items():
+            db.orders.insert_one(json.loads(orders))
+            redis.delete(ids)
+    if hasattr(orderbook, 'completed_trades'):
+        for trades in orderbook.completed_trades.values():
+            db.trades.insert_one(json.loads(trades))
 
 def _backup_orderbook(orderbook):
     with open(ORDERBOOK_FILE, 'wb') as f:
@@ -207,6 +219,6 @@ def _backup_orderbook(orderbook):
     db.orderbook.replace_one({'orderbook_id': 1}, {'orderbook_id': 1, 'orderbook': Binary(orderbook_string)}, upsert=True)
 
 if __name__ == "__main__":
-    orderbook = _setup_databases()
+    orderbook = _setup_orderbook()
     _update_redis()
     app.run(host='0.0.0.0', port=5000, debug=True)
