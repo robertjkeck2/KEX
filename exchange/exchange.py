@@ -150,13 +150,16 @@ def cancel():
 @app.route("/v1/price/best", methods=["GET"])
 def price():
     response = {}
-    current_price = orderbook.get_min_ask()
-    if not current_price:
-        response["errors"] = [{"PRICE_ERROR": "No current sellers in the market."}]
-    else:
-        response["current_price"] = current_price
-        current_time = str(datetime.now())
-        response["time"] = current_time
+    best_ask = orderbook.get_min_ask()
+    best_bid = orderbook.get_max_bid()
+    response["best_ask"] = best_ask
+    response["best_bid"] = best_bid
+    if not best_ask:
+        response["best_ask"] = "N/A"
+    if not best_bid:
+        response["best_bid"] = "N/A"
+    current_time = str(datetime.now())
+    response["time"] = current_time
     return json.dumps(response)
 
 @app.route("/v1/order/book", methods=["GET"])
