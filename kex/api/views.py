@@ -1,15 +1,19 @@
+import json
+
+from django.conf import settings
+from django.core import serializers
+from django.contrib.auth.models import User
+from django_filters import rest_framework as filters
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import redirect
 from rest_framework import mixins
 from rest_framework import permissions
+from rest_framework import status
 from rest_framework import viewsets
 from rest_framework.decorators import detail_route
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.conf import settings
-from django.core import serializers
-from django.contrib.auth.models import User
-from django.http import HttpResponse, JsonResponse
-from django.shortcuts import redirect
-from django.views.decorators.csrf import csrf_exempt
+import requests
 
 from kex.api.models import Account
 from kex.api.models import Order
@@ -23,41 +27,105 @@ from kex.api.serializers import PriceSerializer
 from kex.api.serializers import UserSerializer
 
 
-class CreateListRetrieveViewSet(mixins.CreateModelMixin,
+exchange_uri = 'http://localhost:5000'
+new_endpoint = '/v1/order/new'
+status_endpoint = '/v1/order/status'
+edit_endpoint = '/v1/order/edit'
+cancel_endpoint = '/v1/order/cancel'
+verify_endpoint = '/v1/quote/verify'
+
+class CreateListUpdateRetrieveViewSet(mixins.CreateModelMixin,
                                 mixins.ListModelMixin,
+                                mixins.UpdateModelMixin,
                                 mixins.RetrieveModelMixin,
                                 viewsets.GenericViewSet):
     pass
 
-class UsersViewSet(CreateListRetrieveViewSet):
+class UserViewSet(CreateListUpdateRetrieveViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = (permissions.IsAuthenticatedOrReadOnly,)
+    permission_classes = (permissions.IsAdminUser,)
 
-class AccountViewSet(viewsets.ModelViewSet):
+class AccountViewSet(CreateListUpdateRetrieveViewSet):
     queryset = Account.objects.all()
     serializer_class = AccountSerializer
-    permission_classes = (permissions.IsAuthenticatedOrReadOnly,)
+    permission_classes = (permissions.IsAdminUser,)
 
-class OrderViewSet(CreateListRetrieveViewSet):
+    def partial_update(self, request, *args, **kwargs):
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
+
+class OrderViewSet(viewsets.ModelViewSet):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
-    permission_classes = (permissions.IsAuthenticatedOrReadOnly,)
+    filter_backends = (filters.DjangoFilterBackend,)
+    filter_fields = ('account',)
+    permission_classes = (permissions.IsAuthenticated,)
 
-class TradeViewSet(CreateListRetrieveViewSet):
+    def partial_update(self, request, *args, **kwargs):
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
+
+    def create(self, request):
+        account = Account.objects.get(user=request.user)
+        serializer=self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            if account == request.data["account"] or request.user.is_staff:
+                order_data = serializer.validated_data
+                quote = {
+                    "quote": 
+                        {
+                            "account_id": str(account.account_id),
+                            "side": order_data["side"],
+                            "type": order_data["order_type"],
+                            "symbol": order_data["symbol"],
+                            "quantity": order_data["quantity"],
+                            "price": str(order_data["price"]),
+                        }
+                }
+                check_quote = requests.post(url=f"{exchange_uri}{verify_endpoint}", 
+                    headers={"Content-Type": "application/json"},
+                    data=json.dumps(quote))
+                valid_quote = check_quote.json()["valid"]
+                if valid_quote:
+                    place_order = requests.post(url=f"{exchange_uri}{new_endpoint}",
+                        headers={"Content-Type": "application/json"},
+                        data=json.dumps(quote))
+                    order = place_order.json()
+                    serializer.save(order_id = order["order"]["order_id"], 
+                        was_placed = order["order"]["was_placed"],
+                        was_filled = order["order"]["was_filled"],
+                        was_cancelled = order["order"]["was_cancelled"])
+                    return Response(serializer.data, status=status.HTTP_200_OK)
+                else:
+                    return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID."}],
+                        "status_code": status.HTTP_401_UNAUTHORIZED})
+            else:
+                return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID."}],
+                    "status_code": status.HTTP_401_UNAUTHORIZED})
+        else:
+            return Response({"errors": serializer.errors,
+                "status_code": status.HTTP_400_BAD_REQUEST})
+            
+
+    @detail_route(methods=['GET'], permission_classes=[permissions.IsAuthenticated])
+    def status(self, request, pk):
+        return HttpResponse("yo")
+
+    @detail_route(methods=['POST'], permission_classes=[permissions.IsAuthenticated])
+    def edit(self, request, pk):
+        pass
+
+    @detail_route(methods=['POST'], permission_classes=[permissions.IsAuthenticated])
+    def cancel(self, request, pk):
+        pass
+
+class TradeViewSet(CreateListUpdateRetrieveViewSet):
     queryset = Trade.objects.all()
     serializer_class = TradeSerializer
-    permission_classes = (permissions.IsAuthenticatedOrReadOnly,)
+    permission_classes = (permissions.IsAdminUser,)
 
-class PriceViewSet(CreateListRetrieveViewSet):
+class PriceViewSet(CreateListUpdateRetrieveViewSet):
     queryset = Price.objects.all()
     serializer_class = PriceSerializer
-    permission_classes = (permissions.IsAuthenticatedOrReadOnly,)
-
-class LoginView(APIView):
-    def post(self, request, format=None):
-        if User.objects.filter(username=request.data["username"]).exists():
-            user = User.objects.get(username=request.data["username"])
-            if user.check_password(request.data["password"]):
-                return JsonResponse({"logged_in": True, "message": "Successfully logged in!"})
-        return JsonResponse({"logged_in": False, "message": "Username/password combo does not exist"})
+    permission_classes = (permissions.IsAdminUser,)

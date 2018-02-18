@@ -184,7 +184,7 @@ def _check_quote(quote):
         errors.append({"TYPE_ERROR": "Incorrect LIMIT/MARKET side format."})
     if quote["symbol"] != STOCK_SYMBOL:
         errors.append({"SYMBOL_ERROR": "Incorrect stock symbol for this exchange."})
-    if quote["type"] == "LIMIT" and quote["price"] <= 0:
+    if quote["type"] == "LIMIT" and float(quote["price"]) <= 0:
         errors.append({"PRICE_ERROR": "Price must be greater than 0."})
     if quote["quantity"] <= 0:
         errors.append({"QUANTITY_ERROR": "Quantity must be greater than 0."})

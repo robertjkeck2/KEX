@@ -24,6 +24,7 @@ class TradeSerializer(serializers.ModelSerializer):
 	class Meta:
 		model = Trade
 		fields = '__all__'
+		
 class PriceSerializer(serializers.ModelSerializer):
 
 	class Meta:
@@ -34,7 +35,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 	class Meta:
 		model = User
-		fields = ('id','username','first_name','last_name','email','password',)
+		fields = ('id','username','first_name','last_name','email',)
 		write_only_fields = ('password',)
 		read_only_fields = ('id','is_active','is_staff',)
 

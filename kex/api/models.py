@@ -1,9 +1,18 @@
 import uuid
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.validators import RegexValidator
 from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from rest_framework.authtoken.models import Token
 
+
+@receiver(post_save, sender=settings.AUTH_USER_MODEL)
+def create_auth_token(sender, instance=None, created=False, **kwargs):
+    if created:
+        Token.objects.create(user=instance)
 
 class Account(models.Model):
     account_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -32,7 +41,7 @@ class Trade(models.Model):
         return f"{self.quantity} {self.symbol} @ {self.price}: {self.buyer} & {self.seller}"
 
 class Order(models.Model):
-    order_id = models.CharField(primary_key=True, max_length=500)
+    order_id = models.CharField(primary_key=True, max_length=500, blank=True)
     account = models.ForeignKey(Account, on_delete=models.CASCADE)
     side = models.CharField(max_length=4)
     order_type = models.CharField(max_length=6)
@@ -42,6 +51,9 @@ class Order(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     last_updated_at = models.DateTimeField(blank=True, null=True)
     trades = models.ManyToManyField(Trade, blank=True)
+    was_placed = models.BooleanField(default=False)
+    was_filled = models.BooleanField(default=False)
+    was_cancelled = models.BooleanField(default=False)
 
     def __str__(self):
         order_string = f"{self.side} - {self.quantity} {self.symbol} @ MARKET"
