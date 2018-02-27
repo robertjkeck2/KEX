@@ -1,13 +1,14 @@
 import json
+import requests
 import unittest
 
-from orderbook import Order, OrderList, OrderBook
+from orderbook import Order, OrderList, OrderBook, Trade
 
 
 with open("test_quotes.json") as f:
 	test_quotes = json.load(f)
 
-class test_orders(unittest.TestCase):
+class test_order(unittest.TestCase):
 
 	def setUp(self):
 		self.order = Order(test_quotes[str(1)])
@@ -16,16 +17,34 @@ class test_orders(unittest.TestCase):
 	def test_add_order(self):
 		self.assertEqual(self.order.price, 100.00)
 		self.assertEqual(self.order.side, "BUY")
+		self.assertEqual(self.order.type, 'LIMIT')
+		self.assertEqual(self.order.symbol, 'KEQ')
 		self.assertEqual(self.order.quantity, 50)
 		self.assertEqual(self.order.account_id, "1")
 		self.assertEqual(self.order2.price, None)
 		self.assertEqual(self.order2.side, "BUY")
+		self.assertEqual(self.order2.type, 'MARKET')
+		self.assertEqual(self.order2.symbol, 'KEQ')
 		self.assertEqual(self.order2.quantity, 100)
 		self.assertEqual(self.order2.account_id, "7")
 
 	def test_update_order(self):
 		self.order.update(75)
 		self.assertEqual(self.order.quantity, 75)
+
+class test_trade(unittest.TestCase):
+
+	def setUp(self):
+		self.order = Order(test_quotes[str(4)])
+		self.order2 = Order(test_quotes[str(5)])
+		self.trade = Trade(self.order, self.order2, 75)
+
+	def test_add_order(self):
+		self.assertEqual(self.trade.existing_order, self.order)
+		self.assertEqual(self.trade.incoming_order, self.order2)
+		self.assertEqual(self.trade.price, self.order.price)
+		self.assertEqual(self.trade.symbol, 'KEQ')
+		self.assertEqual(self.trade.quantity, 75)
 
 class test_order_list(unittest.TestCase):
 
@@ -91,6 +110,22 @@ class test_order_book(unittest.TestCase):
 		new_order = json.loads(self.order_book.process_order(test_quotes[str(10)]))
 		self.order_book.cancel_order(new_order["order_id"])
 		self.assertEqual(len(self.order_book.bids.keys()), 1)
+
+class test_exchange(unittest.TestCase):
+
+	def test_verify_endpoint(self):
+		url = 'http://localhost:5000/v1/quote/verify'
+		data = {
+			"quote": test_quotes[str(1)]
+		}
+		headers = {'Content-type': 'application/json'}
+		resp = requests.post(url, data=json.dumps(data), headers=headers)
+		print(resp.text)
+		self.assertEqual(resp.status_code, 200)
+		self.assertEqual(resp.json()["valid"], True)
+		self.assertEqual(resp.json()["errors"], None)
+
+
 
 if __name__=="__main__":
     unittest.main()

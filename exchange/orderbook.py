@@ -26,11 +26,11 @@ class Order(object):
             "side": self.side,
             "type": self.type,
             "symbol": self.symbol,
-            "price": self.price,
+            "price": str(self.price),
             "timestamp": str(self.timestamp),
-            "initial_quantity": self.initial_quantity,
-            "quantity": self.quantity,
-            "trades": str(self.trades)
+            "initial_quantity": str(self.initial_quantity),
+            "quantity": str(self.quantity),
+            "trades": [str(trades) for trades in self.trades]
         }
         return json.dumps(response)
 
@@ -60,9 +60,9 @@ class Trade(object):
             "buyer": self.existing_order.order_id,
             "seller": self.incoming_order.order_id,
             "symbol": self.symbol,
-            "price": self.price,
+            "price": str(self.price),
             "timestamp": str(self.timestamp),
-            "quantity": self.quantity
+            "quantity": str(self.quantity)
         }
         if self.existing_order.side == "BUY":
             response["buyer"] = self.existing_order.order_id

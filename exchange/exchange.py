@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 import json
 from os import path
 import pickle
@@ -23,6 +24,8 @@ db = mongo.exchange_db
 @app.route("/v1/quote/verify", methods=["POST"])
 def check():
     quote = request.get_json()["quote"]
+    if "price" in quote:
+        quote["price"] = Decimal(quote["price"])
     valid, errors = _check_quote(quote)
     response = {}
     response["valid"] = valid
@@ -35,6 +38,8 @@ def check():
 @app.route("/v1/order/new", methods=["POST"])
 def process():
     quote = request.get_json()["quote"]
+    if "price" in quote:
+        quote["price"] = Decimal(quote["price"])
     valid, errors = _check_quote(quote)
     response = {}
     if valid:
@@ -87,6 +92,8 @@ def status():
 @app.route("/v1/order/edit", methods=["POST"])
 def modify():
     quote = request.get_json()["quote"]
+    if "price" in quote:
+        quote["price"] = Decimal(quote["price"])
     order_id = request.get_json()["order_id"]
     valid, errors = _check_quote(quote)
     response = {}
@@ -167,8 +174,8 @@ def order_book():
     response = {}
     bids = {}
     asks = {}
-    bid_volume = [bids.update({key: orderbook.bids[key].volume}) for key in orderbook.bids.keys()]
-    ask_volume = [asks.update({key: orderbook.asks[key].volume}) for key in orderbook.asks.keys()]
+    bid_volume = [bids.update({str(key): orderbook.bids[key].volume}) for key in orderbook.bids.keys()]
+    ask_volume = [asks.update({str(key): orderbook.asks[key].volume}) for key in orderbook.asks.keys()]
     response["bids"] = bids
     response["asks"] = asks
     current_time = str(datetime.now())
