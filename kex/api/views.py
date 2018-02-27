@@ -83,34 +83,47 @@ class OrderViewSet(viewsets.ModelViewSet):
                             "price": str(order_data["price"]),
                         }
                 }
-                check_quote = requests.post(url=f"{exchange_uri}{verify_endpoint}", 
-                    headers={"Content-Type": "application/json"},
-                    data=json.dumps(quote))
-                valid_quote = check_quote.json()["valid"]
-                if valid_quote:
-                    place_order = requests.post(url=f"{exchange_uri}{new_endpoint}",
+                try:
+                    check_quote = requests.post(url=f"{exchange_uri}{verify_endpoint}", 
                         headers={"Content-Type": "application/json"},
                         data=json.dumps(quote))
-                    order = place_order.json()
-                    serializer.save(order_id = order["order"]["order_id"], 
-                        was_placed = order["order"]["was_placed"],
-                        was_filled = order["order"]["was_filled"],
-                        was_cancelled = order["order"]["was_cancelled"])
-                    return Response(serializer.data, status=status.HTTP_200_OK)
+                except Exception as e:
+                    return Response({"errors": [{"API_ERROR": e}],
+                        "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
+                valid_quote = check_quote.json()["valid"]
+                if valid_quote:
+                    try:
+                        place_order = requests.post(url=f"{exchange_uri}{new_endpoint}",
+                            headers={"Content-Type": "application/json"},
+                            data=json.dumps(quote))
+                        order = place_order.json()
+                        serializer.save(order_id = order["order"]["order_id"], 
+                            was_placed = order["order"]["was_placed"],
+                            was_filled = order["order"]["was_filled"],
+                            was_cancelled = order["order"]["was_cancelled"])
+                    except Exception as e:
+                        return Response({"errors": [{"API_ERROR": e}],
+                        "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
+                    return Response(serializer.data, status=status.HTTP_201_CREATED)
                 else:
-                    return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID."}],
-                        "status_code": status.HTTP_401_UNAUTHORIZED})
+                    return Response({"errors": [{"ORDER_ERROR": "Invalid quote."}],
+                        "status_code": status.HTTP_400_BAD_REQUEST})
             else:
-                return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID."}],
+                return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID or API Key."}],
                     "status_code": status.HTTP_401_UNAUTHORIZED})
         else:
             return Response({"errors": serializer.errors,
                 "status_code": status.HTTP_400_BAD_REQUEST})
             
-
-    @detail_route(methods=['GET'], permission_classes=[permissions.IsAuthenticated])
-    def status(self, request, pk):
-        return HttpResponse("yo")
+    def retrieve(self, request, pk):
+        account = Account.objects.get(user=request.user)
+        order = Order.objects.get(pk=pk)
+        if account == order.account or request.user.is_staff:
+            serializer=OrderSerializer(order)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID or API Key."}],
+                "status_code": status.HTTP_401_UNAUTHORIZED})
 
     @detail_route(methods=['POST'], permission_classes=[permissions.IsAuthenticated])
     def edit(self, request, pk):
