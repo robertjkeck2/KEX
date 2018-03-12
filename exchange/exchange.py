@@ -79,13 +79,17 @@ def status():
         order_store = db.orders.find({'order_id': order_id}, {"_id": 0}).limit(1)
         if order_store.count() > 0:
             order = order_store[0]
-            response["was_filled"] = True
+            order["was_placed"] = True
+            order["was_filled"] = True
+            order["was_cancelled"] = False
         else:
             order = {}
             response["errors"] = [{"ORDER_ERROR": "No order with that order ID currently exists."}]
     else:
         order = json.loads(redis.get(order_id))
-        response["was_filled"] = False
+        order["was_placed"] = True
+        order["was_filled"] = False
+        order["was_cancelled"] = False
     response["order"] = order
     return json.dumps(response)
 
