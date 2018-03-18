@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 import json
 import uuid
 
@@ -178,7 +179,7 @@ class OrderBook(object):
         order = None
         if str(order_id) in list(self.ongoing_orders.keys()):
             order_json = json.loads(self.ongoing_orders[order_id])
-            order_list = self.side_mapping[str(order_json["side"])][order_json["price"]]
+            order_list = self.side_mapping[str(order_json["side"])][Decimal(order_json["price"])]
             for orders in order_list.orders:
                 if orders.order_id == order_id:
                     order = orders

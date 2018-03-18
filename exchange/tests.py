@@ -1,3 +1,4 @@
+from decimal import Decimal
 import json
 import requests
 import unittest
@@ -82,7 +83,10 @@ class test_order_book(unittest.TestCase):
 		self.orders = []
 		self.order_book = OrderBook("KEQ")
 		for i in range(1, 10):
-			order = json.loads(self.order_book.process_order(test_quotes[str(i)]))
+			quote = test_quotes[str(i)]
+			if "price" in quote:
+				quote["price"] = Decimal(quote["price"])
+			order = json.loads(self.order_book.process_order(quote))
 			self.orders.append(order)
 			for trades in self.order_book.completed_trades:
 				self.completed_trades.append(trades)
@@ -103,11 +107,17 @@ class test_order_book(unittest.TestCase):
 		self.assertEqual(len(self.completed_orders), 6)
 
 	def test_modify_order(self):
-		new_order = json.loads(self.order_book.modify_order(self.orders[8]["order_id"], test_quotes[str(10)]))
-		self.assertEqual(new_order["price"], 75)
+		quote = test_quotes[str(10)]
+		if "price" in quote:
+			quote["price"] = Decimal(quote["price"])
+		new_order = json.loads(self.order_book.modify_order(self.orders[8]["order_id"], quote))
+		self.assertEqual(new_order["price"], '75')
 
 	def test_cancel_order(self):
-		new_order = json.loads(self.order_book.process_order(test_quotes[str(10)]))
+		quote = test_quotes[str(10)]
+		if "price" in quote:
+			quote["price"] = Decimal(quote["price"])
+		new_order = json.loads(self.order_book.process_order(quote))
 		self.order_book.cancel_order(new_order["order_id"])
 		self.assertEqual(len(self.order_book.bids.keys()), 1)
 
@@ -120,12 +130,41 @@ class test_exchange(unittest.TestCase):
 		}
 		headers = {'Content-type': 'application/json'}
 		resp = requests.post(url, data=json.dumps(data), headers=headers)
-		print(resp.text)
 		self.assertEqual(resp.status_code, 200)
 		self.assertEqual(resp.json()["valid"], True)
-		self.assertEqual(resp.json()["errors"], None)
 
+	def test_new_order_endpoint(self):
+		url = 'http://localhost:5000/v1/order/new'
+		data = {
+			"quote": test_quotes[str(1)]
+		}
+		headers = {'Content-type': 'application/json'}
+		resp = requests.post(url, data=json.dumps(data), headers=headers)
+		self.assertEqual(resp.status_code, 200)
+		self.assertEqual(resp.json()["order"]["was_placed"], True)
 
+	def test_order_book(self):
+		url = 'http://localhost:5000/v1/order/book'
+		resp = requests.get(url)
+		self.assertEqual(resp.status_code, 200)
+		self.assertTrue(resp.json()["bids"])
+
+	def test_order_status(self):
+		url1 = 'http://localhost:5000/v1/order/new'
+		data1 = {
+			"quote": test_quotes[str(1)]
+		}
+		headers1 = {'Content-type': 'application/json'}
+		resp1 = requests.post(url1, data=json.dumps(data1), headers=headers1)
+		print(resp1.json())
+		url = 'http://localhost:5000/v1/order/status'
+		data = {
+			"order_id": resp1.json()["order"]["order_id"]
+		}
+		headers = {'Content-type': 'application/json'}
+		resp = requests.post(url, data=json.dumps(data), headers=headers)
+		self.assertEqual(resp.status_code, 200)
+		self.assertEqual(resp.json()["order"]["was_placed"], True)
 
 if __name__=="__main__":
     unittest.main()
