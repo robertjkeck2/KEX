@@ -10,10 +10,10 @@ class Order(object):
         self.order_id = str(uuid.uuid4())
         self.account_id = quote["account_id"]
         self.side = quote["side"]
-        self.type = quote["type"]
+        self.order_type = quote["order_type"]
         self.symbol = quote["symbol"]
         self.price = None
-        if self.type == "LIMIT":
+        if self.order_type == "LIMIT":
             self.price = quote["price"]
         self.timestamp = datetime.now()
         self.initial_quantity = quote["quantity"]
@@ -25,7 +25,7 @@ class Order(object):
             "order_id": self.order_id,
             "account_id": self.account_id,
             "side": self.side,
-            "type": self.type,
+            "order_type": self.order_type,
             "symbol": self.symbol,
             "price": str(self.price),
             "timestamp": str(self.timestamp),
@@ -39,9 +39,9 @@ class Order(object):
         self.quantity = quantity
 
     def __repr__(self):
-        order_string = f"{self.side} - {self.quantity} {self.symbol} @ MARKET"
+        order_string = f"{self.side} - {self.initial_quantity} {self.symbol} @ MARKET"
         if self.price:
-            order_string = f"{self.side} - {self.quantity} {self.symbol} @ {self.price}"
+            order_string = f"{self.side} - {self.initial_quantity} {self.symbol} @ {self.price}"
         return order_string
 
 class Trade(object):
@@ -58,19 +58,25 @@ class Trade(object):
     def json(self):
         response = {
             "trade_id": self.trade_id,
-            "buyer": self.existing_order.order_id,
-            "seller": self.incoming_order.order_id,
+            "buyer": self.existing_order.account_id,
+            "seller": self.incoming_order.account_id,
+            "buying_order": self.existing_order.order_id,
+            "selling_order": self.incoming_order.order_id,
             "symbol": self.symbol,
             "price": str(self.price),
             "timestamp": str(self.timestamp),
             "quantity": str(self.quantity)
         }
         if self.existing_order.side == "BUY":
-            response["buyer"] = self.existing_order.order_id
-            response["seller"] = self.incoming_order.order_id
+            response["buyer"] = self.existing_order.account_id,
+            response["seller"] = self.incoming_order.account_id,
+            response["buying_order"] = self.existing_order.order_id
+            response["selling_order"] = self.incoming_order.order_id
         else:
-            response["buyer"] = self.incoming_order.order_id
-            response["seller"] = self.existing_order.order_id
+            response["buyer"] = self.incoming_order.account_id,
+            response["seller"] = self.existing_order.account_id,
+            response["buying_order"] = self.incoming_order.order_id
+            response["selling_order"] = self.existing_order.order_id
         return json.dumps(response)
 
     def __repr__(self):
@@ -132,7 +138,7 @@ class OrderBook(object):
         self.bid_volume = 0
         self.ask_volume = 0
         self.ongoing_orders = {}
-        
+
     def get_max_bid(self):
         max_bid = None
         if self.bids:
@@ -164,7 +170,7 @@ class OrderBook(object):
         else:
             self.side_mapping[order.side][order.price].remove_order(order)
             del self.ongoing_orders[order.order_id]
-            self._remove_empty_order_lists()            
+            self._remove_empty_order_lists()
 
     def modify_order(self, order_id, quote):
         order = self._get_order_by_id(order_id)
@@ -172,7 +178,7 @@ class OrderBook(object):
             raise OrderError("Order has already been partially filled.")
         else:
             self.cancel_order(order.order_id)
-            new_order = self.process_order(quote)            
+            new_order = self.process_order(quote)
         return new_order
 
     def _get_order_by_id(self, order_id):
@@ -190,7 +196,7 @@ class OrderBook(object):
     def _direct_order(self, order):
         self.bid_volume = sum([order_list.volume for order_list in self.bids.values()])
         self.ask_volume = sum([order_list.volume for order_list in self.asks.values()])
-        self.type_mapping[order.type](order, self.best_price[order.side]())
+        self.type_mapping[order.order_type](order, self.best_price[order.side]())
 
     def _process_market_order(self, order, best_price):
         order_list = None

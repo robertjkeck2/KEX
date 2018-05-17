@@ -32,6 +32,8 @@ class Trade(models.Model):
     trade_id = models.CharField(primary_key=True, max_length=500)
     buyer = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='buyer_account')
     seller = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='seller_account')
+    buying_order = models.ForeignKey('Order', on_delete=models.CASCADE, related_name='buying_order', blank=True, null=True)
+    selling_order = models.ForeignKey('Order', on_delete=models.CASCADE, related_name='selling_order', blank=True, null=True)
     created_at = models.DateTimeField()
     price = models.DecimalField(max_digits=10, decimal_places=2, blank=True)
     symbol = models.CharField(max_length=10)
@@ -47,20 +49,20 @@ class Order(models.Model):
     order_type = models.CharField(max_length=6)
     symbol = models.CharField(max_length=10)
     price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    initial_quantity = models.IntegerField()
     quantity = models.IntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
-    last_updated_at = models.DateTimeField(blank=True, null=True)
+    last_updated_at = models.DateTimeField(auto_now=True)
     trades = models.ManyToManyField(Trade, blank=True)
     was_placed = models.BooleanField(default=False)
     was_filled = models.BooleanField(default=False)
-    was_cancelled = models.BooleanField(default=False)
 
     def __str__(self):
-        order_string = f"{self.side} - {self.quantity} {self.symbol} @ MARKET"
+        order_string = f"{self.side} - {self.initial_quantity} {self.symbol} @ MARKET"
         if self.price:
-            order_string = f"{self.side} - {self.quantity} {self.symbol} @ {self.price}"
-        return order_string 
-        
+            order_string = f"{self.side} - {self.initial_quantity} {self.symbol} @ {self.price}"
+        return order_string
+
 class Price(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     best_ask = models.DecimalField(max_digits=10, decimal_places=2, blank=True)

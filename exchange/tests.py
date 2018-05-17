@@ -18,13 +18,13 @@ class test_order(unittest.TestCase):
 	def test_add_order(self):
 		self.assertEqual(self.order.price, 100.00)
 		self.assertEqual(self.order.side, "BUY")
-		self.assertEqual(self.order.type, 'LIMIT')
+		self.assertEqual(self.order.order_type, 'LIMIT')
 		self.assertEqual(self.order.symbol, 'KEQ')
 		self.assertEqual(self.order.quantity, 50)
 		self.assertEqual(self.order.account_id, "1")
 		self.assertEqual(self.order2.price, None)
 		self.assertEqual(self.order2.side, "BUY")
-		self.assertEqual(self.order2.type, 'MARKET')
+		self.assertEqual(self.order2.order_type, 'MARKET')
 		self.assertEqual(self.order2.symbol, 'KEQ')
 		self.assertEqual(self.order2.quantity, 100)
 		self.assertEqual(self.order2.account_id, "7")
@@ -92,7 +92,7 @@ class test_order_book(unittest.TestCase):
 				self.completed_trades.append(trades)
 			for orders in self.order_book.completed_orders:
 				self.completed_orders.append(orders)
-		
+
 	def test_get_min_ask(self):
 		self.assertEqual(self.order_book.get_min_ask(), 99.5)
 
@@ -156,7 +156,6 @@ class test_exchange(unittest.TestCase):
 		}
 		headers1 = {'Content-type': 'application/json'}
 		resp1 = requests.post(url1, data=json.dumps(data1), headers=headers1)
-		print(resp1.json())
 		url = 'http://localhost:5000/v1/order/status'
 		data = {
 			"order_id": resp1.json()["order"]["order_id"]

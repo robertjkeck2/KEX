@@ -20,19 +20,21 @@ from kex.api.models import Order
 from kex.api.models import Trade
 from kex.api.models import Price
 from kex.api.permissions import IsOwnerOrReadOnly
-from kex.api.serializers import AccountSerializer 
+from kex.api.serializers import AccountSerializer
 from kex.api.serializers import OrderSerializer
 from kex.api.serializers import TradeSerializer
 from kex.api.serializers import PriceSerializer
 from kex.api.serializers import UserSerializer
 
 
+SYMBOL = "KEQ"
 exchange_uri = 'http://localhost:5000'
 new_endpoint = '/v1/order/new'
 status_endpoint = '/v1/order/status'
 edit_endpoint = '/v1/order/edit'
 cancel_endpoint = '/v1/order/cancel'
 verify_endpoint = '/v1/quote/verify'
+trade_details_endpoint = '/v1/trade/details'
 
 class CreateListUpdateRetrieveViewSet(mixins.CreateModelMixin,
                                 mixins.ListModelMixin,
@@ -56,7 +58,7 @@ class AccountViewSet(CreateListUpdateRetrieveViewSet):
         return self.update(request, *args, **kwargs)
 
 class OrderViewSet(viewsets.ModelViewSet):
-    queryset = Order.objects.all()
+    queryset = Order.objects.filter(was_filled = False)
     serializer_class = OrderSerializer
     filter_backends = (filters.DjangoFilterBackend,)
     filter_fields = ('account',)
@@ -67,57 +69,110 @@ class OrderViewSet(viewsets.ModelViewSet):
         return self.update(request, *args, **kwargs)
 
     def create(self, request):
-        account = Account.objects.get(user=request.user)
-        serializer=self.get_serializer(data=request.data)
-        if serializer.is_valid():
-            if account == request.data["account"] or request.user.is_staff:
-                order_data = serializer.validated_data
-                quote = {
-                    "quote": 
-                        {
-                            "account_id": str(account.account_id),
-                            "side": order_data["side"],
-                            "type": order_data["order_type"],
-                            "symbol": order_data["symbol"],
-                            "quantity": order_data["quantity"],
-                            "price": str(order_data["price"]),
-                        }
-                }
+        try:
+            account = Account.objects.get(user=request.user)
+        except:
+            return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID or API Key."}],
+                "status_code": status.HTTP_401_UNAUTHORIZED})
+        if account == request.data["account"] or request.user.is_staff:
+            order_data = request.data
+            quote = {
+                "quote":
+                    {
+                        "account_id": str(account.account_id),
+                        "side": order_data["side"],
+                        "order_type": order_data["order_type"],
+                        "symbol": SYMBOL,
+                        "quantity": int(order_data["quantity"]),
+                        "price": str(order_data["price"]),
+                    }
+            }
+            try:
+                check_quote = requests.post(url=f"{exchange_uri}{verify_endpoint}",
+                    headers={"Content-Type": "application/json"},
+                    data=json.dumps(quote))
+            except Exception as e:
+                return Response({"errors": [{"API_ERROR": str(e)}],
+                    "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
+            valid_quote = check_quote.json()["valid"]
+            if valid_quote:
                 try:
-                    check_quote = requests.post(url=f"{exchange_uri}{verify_endpoint}", 
+                    place_order = requests.post(url=f"{exchange_uri}{new_endpoint}",
                         headers={"Content-Type": "application/json"},
                         data=json.dumps(quote))
+                    order = place_order.json()
+                    if "order" in order:
+                        order["order"]["account"] = order["order"]["account_id"]
+                        trades = order["order"]["trades"]
+                        order["order"]["trades"] = []
+                        serializer = self.get_serializer(data = order["order"])
+                        serializer.is_valid(raise_exception = True)
+                        serializer.save()
+                        for trade in trades:
+                            try:
+                                trade_object = Trade.objects.get(trade_id = trade)
+                            except:
+                                try:
+                                    trade_details = requests.post(url=f"{exchange_uri}{trade_details_endpoint}",
+                                        headers={"Content-Type": "application/json"},
+                                        data=json.dumps({"trade_id": trade}))
+                                except Exception as e:
+                                    return Response({"errors": [{"API_ERROR": str(e)}],
+                                        "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
+                                if "trade" in trade_details.json():
+                                    new_trade = trade_details.json()["trade"]
+                                    new_trade["created_at"] = new_trade["timestamp"]
+                                    new_trade["buyer"] = new_trade["buyer"][0]
+                                    new_trade["seller"] = new_trade["seller"][0]
+                                    update_orders = [new_trade["buying_order"], new_trade["selling_order"]]
+                                    trade_serializer = TradeSerializer(data = new_trade)
+                                    trade_serializer.is_valid(raise_exception = True)
+                                    trade_serializer.save()
+                                    for orders in update_orders:
+                                        try:
+                                            order_details = requests.post(url=f"{exchange_uri}{status_endpoint}",
+                                                headers={"Content-Type": "application/json"},
+                                                data=json.dumps({"order_id": orders}))
+                                        except Exception as e:
+                                            return Response({"errors": [{"API_ERROR": str(e)}],
+                                                "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
+                                        if "order" in order_details.json():
+                                            updated_order = Order.objects.get(order_id = orders)
+                                            updated_order.quantity = order_details.json()["order"]["quantity"]
+                                            updated_order.was_filled = order_details.json()["order"]["was_filled"]
+                                            updated_order.save()
+                                        else:
+                                            return Response({"errors": order_details["errors"],
+                                                "status_code": status.HTTP_400_BAD_REQUEST})
+                                else:
+                                    return Response({"errors": trade["errors"],
+                                        "status_code": status.HTTP_400_BAD_REQUEST})
+                        serializer.save(trades = trades)
+                    else:
+                        return Response({"errors": order["errors"],
+                            "status_code": status.HTTP_400_BAD_REQUEST})
                 except Exception as e:
-                    return Response({"errors": [{"API_ERROR": e}],
-                        "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
-                valid_quote = check_quote.json()["valid"]
-                if valid_quote:
-                    try:
-                        place_order = requests.post(url=f"{exchange_uri}{new_endpoint}",
-                            headers={"Content-Type": "application/json"},
-                            data=json.dumps(quote))
-                        order = place_order.json()
-                        serializer.save(order_id = order["order"]["order_id"], 
-                            was_placed = order["order"]["was_placed"],
-                            was_filled = order["order"]["was_filled"],
-                            was_cancelled = order["order"]["was_cancelled"])
-                    except Exception as e:
-                        return Response({"errors": [{"API_ERROR": e}],
-                        "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
-                    return Response(serializer.data, status=status.HTTP_201_CREATED)
-                else:
-                    return Response({"errors": [{"ORDER_ERROR": "Invalid quote."}],
-                        "status_code": status.HTTP_400_BAD_REQUEST})
+                    return Response({"errors": [{"API_ERROR": str(e)}],
+                    "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
             else:
-                return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID or API Key."}],
-                    "status_code": status.HTTP_401_UNAUTHORIZED})
+                return Response({"errors": [{"ORDER_ERROR": "Invalid quote."}],
+                    "status_code": status.HTTP_400_BAD_REQUEST})
         else:
-            return Response({"errors": serializer.errors,
-                "status_code": status.HTTP_400_BAD_REQUEST})
-            
+            return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID or API Key."}],
+                "status_code": status.HTTP_401_UNAUTHORIZED})
+
     def retrieve(self, request, pk):
-        account = Account.objects.get(user=request.user)
-        order = Order.objects.get(pk=pk)
+        try:
+            account = Account.objects.get(user=request.user)
+        except:
+            return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID or API Key."}],
+                "status_code": status.HTTP_401_UNAUTHORIZED})
+        try:
+            order = Order.objects.get(pk=pk)
+        except:
+            return Response({"errors": [{"ORDER_ERROR": "Incorrect order ID."}],
+                "status_code": status.HTTP_400_BAD_REQUEST})
         if account == order.account or request.user.is_staff:
             serializer=OrderSerializer(order)
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -127,11 +182,143 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     @detail_route(methods=['POST'], permission_classes=[permissions.IsAuthenticated])
     def edit(self, request, pk):
-        pass
+        try:
+            account = Account.objects.get(user=request.user)
+        except:
+            return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID or API Key."}],
+                "status_code": status.HTTP_401_UNAUTHORIZED})
+        try:
+            order = Order.objects.get(pk=pk)
+        except:
+            return Response({"errors": [{"ORDER_ERROR": "Incorrect order ID."}],
+                "status_code": status.HTTP_400_BAD_REQUEST})
+        updated_data = request.data
+        if account == order.account or request.user.is_staff:
+            quote = {
+                "quote": {
+                    "account_id": str(account.account_id),
+                    "side": order.side,
+                    "order_type": order.order_type,
+                    "symbol": order.symbol,
+                    "quantity": order.quantity,
+                    "price": str(order.price),
+                },
+                "order_id": str(order.order_id)
+            }
+            if "side" in updated_data:
+                quote["quote"]["side"] = updated_data["side"]
+            if "order_type" in updated_data:
+                quote["quote"]["order_type"] = updated_data["order_type"]
+            if "quantity" in updated_data:
+                quote["quote"]["quantity"] = int(updated_data["quantity"])
+            if "price" in updated_data:
+                quote["quote"]["price"] = updated_data["price"]
+            try:
+                check_quote = requests.post(url=f"{exchange_uri}{verify_endpoint}",
+                    headers={"Content-Type": "application/json"},
+                    data=json.dumps(quote))
+            except Exception as e:
+                return Response({"errors": [{"API_ERROR": str(e)}],
+                    "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
+            valid_quote = check_quote.json()["valid"]
+            if valid_quote:
+                try:
+                    edit_order = requests.post(url=f"{exchange_uri}{edit_endpoint}",
+                        headers={"Content-Type": "application/json"},
+                        data=json.dumps(quote))
+                    new_order = edit_order.json()
+                    if "order" in new_order:
+                        new_order["order"]["account"] = new_order["order"]["account_id"]
+                        trades = new_order["order"]["trades"]
+                        new_order["order"]["trades"] = []
+                        serializer = self.get_serializer(data = new_order["order"])
+                        serializer.is_valid(raise_exception = True)
+                        serializer.save()
+                        for trade in trades:
+                            try:
+                                trade_object = Trade.objects.get(trade_id = trade)
+                            except:
+                                try:
+                                    trade_details = requests.post(url=f"{exchange_uri}{trade_details_endpoint}",
+                                        headers={"Content-Type": "application/json"},
+                                        data=json.dumps({"trade_id": trade}))
+                                except Exception as e:
+                                    return Response({"errors": [{"API_ERROR": str(e)}],
+                                        "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
+                                if "trade" in trade_details.json():
+                                    new_trade = trade_details.json()["trade"]
+                                    new_trade["created_at"] = new_trade["timestamp"]
+                                    new_trade["buyer"] = new_trade["buyer"][0]
+                                    new_trade["seller"] = new_trade["seller"][0]
+                                    update_orders = [new_trade["buying_order"], new_trade["selling_order"]]
+                                    trade_serializer = TradeSerializer(data = new_trade)
+                                    trade_serializer.is_valid(raise_exception = True)
+                                    trade_serializer.save()
+                                    for orders in update_orders:
+                                        try:
+                                            order_details = requests.post(url=f"{exchange_uri}{status_endpoint}",
+                                                headers={"Content-Type": "application/json"},
+                                                data=json.dumps({"order_id": orders}))
+                                        except Exception as e:
+                                            return Response({"errors": [{"API_ERROR": str(e)}],
+                                                "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
+                                        if "order" in order_details.json():
+                                            updated_order = Order.objects.get(order_id = orders)
+                                            updated_order.quantity = order_details.json()["order"]["quantity"]
+                                            updated_order.was_filled = order_details.json()["order"]["was_filled"]
+                                            updated_order.save()
+                                        else:
+                                            return Response({"errors": order_details["errors"],
+                                                "status_code": status.HTTP_400_BAD_REQUEST})
+                                else:
+                                    return Response({"errors": trade["errors"],
+                                        "status_code": status.HTTP_400_BAD_REQUEST})
+                        serializer.save(trades = trades)
+                        order.delete()
+                    else:
+                        return Response({"errors": new_order["errors"],
+                            "status_code": status.HTTP_400_BAD_REQUEST})
+                except Exception as e:
+                    return Response({"errors": [{"API_ERROR": str(e)}],
+                    "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            else:
+                return Response({"errors": [{"ORDER_ERROR": "Invalid quote."}],
+                    "status_code": status.HTTP_400_BAD_REQUEST})
+        else:
+            return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID or API Key."}],
+                "status_code": status.HTTP_401_UNAUTHORIZED})
 
     @detail_route(methods=['POST'], permission_classes=[permissions.IsAuthenticated])
     def cancel(self, request, pk):
-        pass
+        try:
+            account = Account.objects.get(user=request.user)
+        except:
+            return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID or API Key."}],
+                "status_code": status.HTTP_401_UNAUTHORIZED})
+        try:
+            order = Order.objects.get(pk=pk)
+        except:
+            return Response({"errors": [{"ORDER_ERROR": "Incorrect order ID."}],
+                "status_code": status.HTTP_400_BAD_REQUEST})
+        if account == order.account or request.user.is_staff:
+            try:
+                cancel_order = requests.post(url=f"{exchange_uri}{cancel_endpoint}",
+                    headers={"Content-Type": "application/json"},
+                    data=json.dumps({"order_id": order.order_id}))
+            except Exception as e:
+                return Response({"errors": [{"API_ERROR": str(e)}],
+                    "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
+            if "order_id" in cancel_order.json():
+                if cancel_order.json()["was_cancelled"]:
+                    order.delete()
+            else:
+                return Response({"errors": cancel_order.json()["errors"],
+                    "status_code": status.HTTP_400_BAD_REQUEST})
+            return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
+        else:
+            return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID or API Key."}],
+                "status_code": status.HTTP_401_UNAUTHORIZED})
 
 class TradeViewSet(CreateListUpdateRetrieveViewSet):
     queryset = Trade.objects.all()

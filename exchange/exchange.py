@@ -7,6 +7,7 @@ import pickle
 from bson.binary import Binary
 from flask import Flask, request
 from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 from redis import StrictRedis, RedisError
 
 from orderbook import OrderBook
@@ -48,7 +49,6 @@ def process():
             _backup_orderbook(orderbook)
             order["was_placed"] = True
             order["was_filled"] = False
-            order["was_cancelled"] = False
             try:
                 redis.set(order["order_id"], json.dumps(order))
                 _update_redis()
@@ -75,22 +75,27 @@ def process():
 def status():
     order_id = request.get_json()["order_id"]
     response = {}
-    if order_id not in str(redis.keys()):
-        order_store = db.orders.find({'order_id': order_id}, {"_id": 0}).limit(1)
-        if order_store.count() > 0:
-            order = order_store[0]
-            order["was_placed"] = True
-            order["was_filled"] = True
-            order["was_cancelled"] = False
+    errors = []
+    try:
+        if order_id not in str(redis.keys()):
+            order_store = db.orders.find({'order_id': order_id}, {"_id": 0}).limit(1)
+            if order_store.count() > 0:
+                order = order_store[0]
+                order["was_placed"] = True
+                order["was_filled"] = True
+            else:
+                order = {}
+                response["errors"] = [{"ORDER_ERROR": "No order with that order ID currently exists."}]
         else:
-            order = {}
-            response["errors"] = [{"ORDER_ERROR": "No order with that order ID currently exists."}]
-    else:
-        order = json.loads(redis.get(order_id))
-        order["was_placed"] = True
-        order["was_filled"] = False
-        order["was_cancelled"] = False
-    response["order"] = order
+            order = json.loads(redis.get(order_id))
+            order["was_placed"] = True
+            order["was_filled"] = False
+        response["order"] = order
+    except RedisError as err:
+        errors.append({"REDIS_ERROR": str(err)})
+        pass
+    if errors:
+        response["errors"] = errors
     return json.dumps(response)
 
 @app.route("/v1/order/edit", methods=["POST"])
@@ -107,7 +112,6 @@ def modify():
             _backup_orderbook(orderbook)
             new_order["was_placed"] = True
             new_order["was_filled"] = False
-            new_order["was_cancelled"] = False
             try:
                 redis.delete(order_id)
                 redis.set(new_order["order_id"], json.dumps(new_order))
@@ -116,7 +120,7 @@ def modify():
                 errors.append({"REDIS_ERROR": str(err)})
                 pass
             if new_order["order_id"] not in str(redis.keys()):
-                new_order["filled"] = True
+                new_order["was_filled"] = True
             response["order"] = new_order
         except OrderError as err:
             errors.append({"ORDER_ERROR": str(err)})
@@ -128,13 +132,13 @@ def modify():
             errors.append({"PRICE_ERROR": str(err)})
             pass
         if errors:
-            response["errors"] = errors    
+            response["errors"] = errors
     return json.dumps(response)
 
 @app.route("/v1/order/cancel", methods=["POST"])
 def cancel():
     order_id = request.get_json()["order_id"]
-    errors = []  
+    errors = []
     response = {}
     try:
         orderbook.cancel_order(order_id)
@@ -186,25 +190,45 @@ def order_book():
     response["timestamp"] = current_time
     return json.dumps(response)
 
+@app.route("/v1/trade/details", methods=["POST"])
+def trade_details():
+    trade_id = request.get_json()["trade_id"]
+    response = {}
+    errors = []
+    try:
+        trade = db.trades.find_one({"trade_id": trade_id})
+        if trade:
+            trade.pop("_id", None)
+            response["trade"] = trade
+        else:
+            errors.append({"TRADE_ERROR": "No trade with that trade ID currently exists."})
+    except PyMongoError as err:
+        errors.append({"MONGODB_ERROR": str(err)})
+        pass
+    if errors:
+        response["errors"] = errors
+    return json.dumps(response)
+
+
 def _check_quote(quote):
     valid = False
     errors = []
     if quote["side"] != "BUY" and quote["side"] != "SELL":
         errors.append({"SIDE_ERROR": "Incorrect BUY/SELL side format."})
-    if quote["type"] != "MARKET" and quote["type"] != "LIMIT":
+    if quote["order_type"] != "MARKET" and quote["order_type"] != "LIMIT":
         errors.append({"TYPE_ERROR": "Incorrect LIMIT/MARKET side format."})
     if quote["symbol"] != STOCK_SYMBOL:
         errors.append({"SYMBOL_ERROR": "Incorrect stock symbol for this exchange."})
-    if quote["type"] == "LIMIT" and float(quote["price"]) <= 0:
+    if quote["order_type"] == "LIMIT" and float(quote["price"]) <= 0:
         errors.append({"PRICE_ERROR": "Price must be greater than 0."})
-    if quote["quantity"] <= 0:
+    if int(quote["quantity"]) <= 0:
         errors.append({"QUANTITY_ERROR": "Quantity must be greater than 0."})
     if not errors:
         valid = True
     return valid, errors
 
 def _setup_orderbook():
-    [redis.delete(key) for key in redis.keys()] 
+    [redis.delete(key) for key in redis.keys()]
     orderbook_store = db.orderbook.find({'orderbook_id': 1}).limit(1)
     if path.isfile(ORDERBOOK_FILE):
         with open(ORDERBOOK_FILE, 'rb') as f:
