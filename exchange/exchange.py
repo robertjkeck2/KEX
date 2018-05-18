@@ -167,12 +167,8 @@ def price():
     response = {}
     best_ask = orderbook.get_min_ask()
     best_bid = orderbook.get_max_bid()
-    response["best_ask"] = best_ask
-    response["best_bid"] = best_bid
-    if not best_ask:
-        response["best_ask"] = "N/A"
-    if not best_bid:
-        response["best_bid"] = "N/A"
+    response["best_ask"] = float(best_ask) if best_ask else 0
+    response["best_bid"] = float(best_bid) if best_bid else 0
     current_time = str(datetime.now())
     response["time"] = current_time
     return json.dumps(response)

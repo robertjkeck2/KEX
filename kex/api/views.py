@@ -10,7 +10,7 @@ from rest_framework import mixins
 from rest_framework import permissions
 from rest_framework import status
 from rest_framework import viewsets
-from rest_framework.decorators import detail_route
+from rest_framework.decorators import detail_route, list_route
 from rest_framework.response import Response
 from rest_framework.views import APIView
 import requests
@@ -34,6 +34,7 @@ status_endpoint = '/v1/order/status'
 edit_endpoint = '/v1/order/edit'
 cancel_endpoint = '/v1/order/cancel'
 verify_endpoint = '/v1/quote/verify'
+price_endpoint = '/v1/price/best'
 trade_details_endpoint = '/v1/trade/details'
 
 class CreateListUpdateRetrieveViewSet(mixins.CreateModelMixin,
@@ -102,52 +103,7 @@ class OrderViewSet(viewsets.ModelViewSet):
                         data=json.dumps(quote))
                     order = place_order.json()
                     if "order" in order:
-                        order["order"]["account"] = order["order"]["account_id"]
-                        trades = order["order"]["trades"]
-                        order["order"]["trades"] = []
-                        serializer = self.get_serializer(data = order["order"])
-                        serializer.is_valid(raise_exception = True)
-                        serializer.save()
-                        for trade in trades:
-                            try:
-                                trade_object = Trade.objects.get(trade_id = trade)
-                            except:
-                                try:
-                                    trade_details = requests.post(url=f"{exchange_uri}{trade_details_endpoint}",
-                                        headers={"Content-Type": "application/json"},
-                                        data=json.dumps({"trade_id": trade}))
-                                except Exception as e:
-                                    return Response({"errors": [{"API_ERROR": str(e)}],
-                                        "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
-                                if "trade" in trade_details.json():
-                                    new_trade = trade_details.json()["trade"]
-                                    new_trade["created_at"] = new_trade["timestamp"]
-                                    new_trade["buyer"] = new_trade["buyer"][0]
-                                    new_trade["seller"] = new_trade["seller"][0]
-                                    update_orders = [new_trade["buying_order"], new_trade["selling_order"]]
-                                    trade_serializer = TradeSerializer(data = new_trade)
-                                    trade_serializer.is_valid(raise_exception = True)
-                                    trade_serializer.save()
-                                    for orders in update_orders:
-                                        try:
-                                            order_details = requests.post(url=f"{exchange_uri}{status_endpoint}",
-                                                headers={"Content-Type": "application/json"},
-                                                data=json.dumps({"order_id": orders}))
-                                        except Exception as e:
-                                            return Response({"errors": [{"API_ERROR": str(e)}],
-                                                "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
-                                        if "order" in order_details.json():
-                                            updated_order = Order.objects.get(order_id = orders)
-                                            updated_order.quantity = order_details.json()["order"]["quantity"]
-                                            updated_order.was_filled = order_details.json()["order"]["was_filled"]
-                                            updated_order.save()
-                                        else:
-                                            return Response({"errors": order_details["errors"],
-                                                "status_code": status.HTTP_400_BAD_REQUEST})
-                                else:
-                                    return Response({"errors": trade["errors"],
-                                        "status_code": status.HTTP_400_BAD_REQUEST})
-                        serializer.save(trades = trades)
+                        serializer = self._update_order_trades_price(order)
                     else:
                         return Response({"errors": order["errors"],
                             "status_code": status.HTTP_400_BAD_REQUEST})
@@ -228,52 +184,7 @@ class OrderViewSet(viewsets.ModelViewSet):
                         data=json.dumps(quote))
                     new_order = edit_order.json()
                     if "order" in new_order:
-                        new_order["order"]["account"] = new_order["order"]["account_id"]
-                        trades = new_order["order"]["trades"]
-                        new_order["order"]["trades"] = []
-                        serializer = self.get_serializer(data = new_order["order"])
-                        serializer.is_valid(raise_exception = True)
-                        serializer.save()
-                        for trade in trades:
-                            try:
-                                trade_object = Trade.objects.get(trade_id = trade)
-                            except:
-                                try:
-                                    trade_details = requests.post(url=f"{exchange_uri}{trade_details_endpoint}",
-                                        headers={"Content-Type": "application/json"},
-                                        data=json.dumps({"trade_id": trade}))
-                                except Exception as e:
-                                    return Response({"errors": [{"API_ERROR": str(e)}],
-                                        "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
-                                if "trade" in trade_details.json():
-                                    new_trade = trade_details.json()["trade"]
-                                    new_trade["created_at"] = new_trade["timestamp"]
-                                    new_trade["buyer"] = new_trade["buyer"][0]
-                                    new_trade["seller"] = new_trade["seller"][0]
-                                    update_orders = [new_trade["buying_order"], new_trade["selling_order"]]
-                                    trade_serializer = TradeSerializer(data = new_trade)
-                                    trade_serializer.is_valid(raise_exception = True)
-                                    trade_serializer.save()
-                                    for orders in update_orders:
-                                        try:
-                                            order_details = requests.post(url=f"{exchange_uri}{status_endpoint}",
-                                                headers={"Content-Type": "application/json"},
-                                                data=json.dumps({"order_id": orders}))
-                                        except Exception as e:
-                                            return Response({"errors": [{"API_ERROR": str(e)}],
-                                                "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
-                                        if "order" in order_details.json():
-                                            updated_order = Order.objects.get(order_id = orders)
-                                            updated_order.quantity = order_details.json()["order"]["quantity"]
-                                            updated_order.was_filled = order_details.json()["order"]["was_filled"]
-                                            updated_order.save()
-                                        else:
-                                            return Response({"errors": order_details["errors"],
-                                                "status_code": status.HTTP_400_BAD_REQUEST})
-                                else:
-                                    return Response({"errors": trade["errors"],
-                                        "status_code": status.HTTP_400_BAD_REQUEST})
-                        serializer.save(trades = trades)
+                        serializer = self._update_order_trades_price(new_order)
                         order.delete()
                     else:
                         return Response({"errors": new_order["errors"],
@@ -320,12 +231,78 @@ class OrderViewSet(viewsets.ModelViewSet):
             return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID or API Key."}],
                 "status_code": status.HTTP_401_UNAUTHORIZED})
 
+    def _update_order_trades_price(self, new_order):
+        new_order["order"]["account"] = new_order["order"]["account_id"]
+        trades = new_order["order"]["trades"]
+        new_order["order"]["trades"] = []
+        serializer = self.get_serializer(data = new_order["order"])
+        serializer.is_valid(raise_exception = True)
+        serializer.save()
+        for trade in trades:
+            try:
+                trade_object = Trade.objects.get(trade_id = trade)
+            except:
+                try:
+                    trade_details = requests.post(url=f"{exchange_uri}{trade_details_endpoint}",
+                        headers={"Content-Type": "application/json"},
+                        data=json.dumps({"trade_id": trade}))
+                except Exception as e:
+                    return Response({"errors": [{"API_ERROR": str(e)}],
+                        "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
+                if "trade" in trade_details.json():
+                    new_trade = trade_details.json()["trade"]
+                    new_trade["created_at"] = new_trade["timestamp"]
+                    new_trade["buyer"] = new_trade["buyer"][0]
+                    new_trade["seller"] = new_trade["seller"][0]
+                    update_orders = [new_trade["buying_order"], new_trade["selling_order"]]
+                    trade_serializer = TradeSerializer(data = new_trade)
+                    trade_serializer.is_valid(raise_exception = True)
+                    trade_serializer.save()
+                    for orders in update_orders:
+                        try:
+                            order_details = requests.post(url=f"{exchange_uri}{status_endpoint}",
+                                headers={"Content-Type": "application/json"},
+                                data=json.dumps({"order_id": orders}))
+                        except Exception as e:
+                            return Response({"errors": [{"API_ERROR": str(e)}],
+                                "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
+                        if "order" in order_details.json():
+                            updated_order = Order.objects.get(order_id = orders)
+                            updated_order.quantity = order_details.json()["order"]["quantity"]
+                            updated_order.was_filled = order_details.json()["order"]["was_filled"]
+                            updated_order.save()
+                        else:
+                            return Response({"errors": order_details["errors"],
+                                "status_code": status.HTTP_400_BAD_REQUEST})
+                else:
+                    return Response({"errors": trade["errors"],
+                        "status_code": status.HTTP_400_BAD_REQUEST})
+        serializer.save(trades = trades)
+        try:
+            price_details = requests.get(url=f"{exchange_uri}{price_endpoint}")
+        except Exception as e:
+            return Response({"errors": [{"API_ERROR": str(e)}],
+                "status_code": status.HTTP_503_SERVICE_UNAVAILABLE})
+        price_serializer = PriceSerializer(data = price_details.json())
+        price_serializer.is_valid(raise_exception = True)
+        price_serializer.save()
+        return serializer
+
 class TradeViewSet(CreateListUpdateRetrieveViewSet):
     queryset = Trade.objects.all()
     serializer_class = TradeSerializer
     permission_classes = (permissions.IsAdminUser,)
 
-class PriceViewSet(CreateListUpdateRetrieveViewSet):
+class PriceViewSet(viewsets.ModelViewSet):
     queryset = Price.objects.all()
     serializer_class = PriceSerializer
-    permission_classes = (permissions.IsAdminUser,)
+    permission_classes = (permissions.IsAuthenticated,)
+
+    @list_route(methods=['GET'], permission_classes=[permissions.IsAuthenticated])
+    def now(self, request):
+        try:
+            most_recent_price = Price.objects.last()
+        except:
+            return Response({"errors": [{"PRICE_ERROR": "No historical prices."}],
+                "status_code": status.HTTP_400_BAD_REQUEST})
+        return Response(PriceSerializer(most_recent_price).data, status=status.HTTP_200_OK)
