@@ -10,6 +10,7 @@ from rest_framework import mixins
 from rest_framework import permissions
 from rest_framework import status
 from rest_framework import viewsets
+from rest_framework.authtoken.models import Token
 from rest_framework.decorators import detail_route, list_route
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -37,26 +38,63 @@ verify_endpoint = '/v1/quote/verify'
 price_endpoint = '/v1/price/best'
 trade_details_endpoint = '/v1/trade/details'
 
-class CreateListUpdateRetrieveViewSet(mixins.CreateModelMixin,
-                                mixins.ListModelMixin,
-                                mixins.UpdateModelMixin,
-                                mixins.RetrieveModelMixin,
-                                viewsets.GenericViewSet):
-    pass
-
-class UserViewSet(CreateListUpdateRetrieveViewSet):
-    queryset = User.objects.all()
-    serializer_class = UserSerializer
-    permission_classes = (permissions.IsAdminUser,)
-
-class AccountViewSet(CreateListUpdateRetrieveViewSet):
+class AccountCreateView(viewsets.GenericViewSet):
     queryset = Account.objects.all()
     serializer_class = AccountSerializer
-    permission_classes = (permissions.IsAdminUser,)
+    permission_classes = (permissions.AllowAny,)
 
-    def partial_update(self, request, *args, **kwargs):
-        kwargs['partial'] = True
-        return self.update(request, *args, **kwargs)
+    def create(self, request):
+        serializer = UserSerializer(data = request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            if user:
+                token = Token.objects.get_or_create(user = user)
+                print(token)
+                account_data = {
+                    "user": user.id,
+                    "phone_number": request.data['phone_number'],
+                    "token": token[0].key
+                }
+                account_serializer = AccountSerializer(data = account_data)
+                if account_serializer.is_valid():
+                    account_serializer.save()
+                    return Response(account_serializer.data, status=status.HTTP_201_CREATED)
+                return Response(account_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class AccountViewSet(viewsets.GenericViewSet):
+    queryset = Account.objects.all()
+    serializer_class = AccountSerializer
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def retrieve(self, request, pk):
+        try:
+            account = Account.objects.get(pk=pk)
+        except:
+            return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID or API Key."}],
+                "status_code": status.HTTP_401_UNAUTHORIZED})
+        if account.token == Token.objects.get(user = request.user):
+            return Response(AccountSerializer(account).data, status=status.HTTP_200_OK)
+        else:
+            return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID or API Key."}],
+                "status_code": status.HTTP_401_UNAUTHORIZED})
+
+    def partial_update(self, request, pk):
+        instance = self.get_object()
+        serializer = self.serializer_class(instance, data=request.data, partial=True)
+        try:
+            account = Account.objects.get(pk=pk)
+        except:
+            return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID or API Key."}],
+                "status_code": status.HTTP_401_UNAUTHORIZED})
+        if account.token == Token.objects.get(user = request.user):
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({"errors": [{"ORDER_ERROR": "Incorrect account ID or API Key."}],
+                "status_code": status.HTTP_401_UNAUTHORIZED})
 
 class OrderViewSet(viewsets.ModelViewSet):
     queryset = Order.objects.filter(was_filled = False)
@@ -64,10 +102,6 @@ class OrderViewSet(viewsets.ModelViewSet):
     filter_backends = (filters.DjangoFilterBackend,)
     filter_fields = ('account',)
     permission_classes = (permissions.IsAuthenticated,)
-
-    def partial_update(self, request, *args, **kwargs):
-        kwargs['partial'] = True
-        return self.update(request, *args, **kwargs)
 
     def create(self, request):
         try:
@@ -288,12 +322,12 @@ class OrderViewSet(viewsets.ModelViewSet):
         price_serializer.save()
         return serializer
 
-class TradeViewSet(CreateListUpdateRetrieveViewSet):
+class TradeViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     queryset = Trade.objects.all()
     serializer_class = TradeSerializer
-    permission_classes = (permissions.IsAdminUser,)
+    permission_classes = (permissions.IsAuthenticated,)
 
-class PriceViewSet(viewsets.ModelViewSet):
+class PriceViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     queryset = Price.objects.all()
     serializer_class = PriceSerializer
     permission_classes = (permissions.IsAuthenticated,)

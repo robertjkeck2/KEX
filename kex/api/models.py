@@ -9,11 +9,6 @@ from django.dispatch import receiver
 from rest_framework.authtoken.models import Token
 
 
-@receiver(post_save, sender=settings.AUTH_USER_MODEL)
-def create_auth_token(sender, instance=None, created=False, **kwargs):
-    if created:
-        Token.objects.create(user=instance)
-
 class Account(models.Model):
     account_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -24,6 +19,7 @@ class Account(models.Model):
         Up to 15 digits allowed.",
     )
     phone_number = models.CharField(validators=[phone_regex], unique=True, max_length=15)
+    token = models.ForeignKey(Token, on_delete=models.CASCADE, blank=True, null=True)
 
     def __str__(self):
         return f"{self.user.first_name} {self.user.last_name}"
