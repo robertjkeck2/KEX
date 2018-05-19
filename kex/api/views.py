@@ -49,7 +49,6 @@ class AccountCreateView(viewsets.GenericViewSet):
             user = serializer.save()
             if user:
                 token = Token.objects.get_or_create(user = user)
-                print(token)
                 account_data = {
                     "user": user.id,
                     "phone_number": request.data['phone_number'],
@@ -59,7 +58,10 @@ class AccountCreateView(viewsets.GenericViewSet):
                 if account_serializer.is_valid():
                     account_serializer.save()
                     return Response(account_serializer.data, status=status.HTTP_201_CREATED)
-                return Response(account_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    user.delete()
+                    token[0].delete()
+                    return Response(account_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class AccountViewSet(viewsets.GenericViewSet):
