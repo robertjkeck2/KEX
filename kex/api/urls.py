@@ -13,5 +13,6 @@ router.register(r'price', views.PriceViewSet)
 
 urlpatterns = [
 	path('', include(router.urls)),
+	path('obtain_token/', auth_views.obtain_auth_token, name='auth'),
 	path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
 ]
