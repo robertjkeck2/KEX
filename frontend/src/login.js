@@ -6,21 +6,21 @@ import { store } from './store'
 class Login extends Component {
 
   constructor(props) {
-      super(props);
-      this.state = {
-          username: '',
-          password: '',
-          auth: false,
-          invalidCred: null,
-      };
-      store.subscribe(() => {
-        this.setState({
-          auth: store.getState().token != null,
-        });
+    super(props);
+    this.state = {
+        username: '',
+        password: '',
+        auth: false,
+        invalidCred: null,
+    };
+    store.subscribe(() => {
+      this.setState({
+        auth: store.getState().token != null,
       });
-      this.logIn = this.logIn.bind(this);
-      this.handleSubmit = this.handleSubmit.bind(this);
-      this.handleInputChange = this.handleInputChange.bind(this);
+    });
+    this.logIn = this.logIn.bind(this);
+    this.handleSubmit = this.handleSubmit.bind(this);
+    this.handleInputChange = this.handleInputChange.bind(this);
   }
 
   logIn() {

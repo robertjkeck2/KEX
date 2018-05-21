@@ -329,12 +329,22 @@ class TradeViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
     serializer_class = TradeSerializer
     permission_classes = (permissions.IsAuthenticated,)
 
+class EventFilter(filters.FilterSet):
+
+    created_at = filters.DateFromToRangeFilter()
+
+    class Meta:
+        model = Price
+        fields = ['created_at']
+
 class PriceViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     queryset = Price.objects.all()
     serializer_class = PriceSerializer
-    permission_classes = (permissions.IsAuthenticated,)
+    filter_backends = (filters.DjangoFilterBackend,)
+    filter_class = EventFilter
+    permission_classes = (permissions.AllowAny,)
 
-    @list_route(methods=['GET'], permission_classes=[permissions.IsAuthenticated])
+    @list_route(methods=['GET'], permission_classes=[permissions.AllowAny])
     def now(self, request):
         try:
             most_recent_price = Price.objects.last()
