@@ -18,8 +18,8 @@ STOCK_SYMBOL = "KEQ"
 ORDERBOOK_FILE = 'orderbook.pickle'
 
 app = Flask(__name__)
-redis = StrictRedis(host="localhost", port=6379, db=0, charset="utf-8", decode_responses=True)
-mongo = MongoClient(host="localhost")
+redis = StrictRedis(host="redis", port=6379, db=0, charset="utf-8", decode_responses=True)
+mongo = MongoClient(host="mongo")
 db = mongo.exchange_db
 
 @app.route("/v1/quote/verify", methods=["POST"])

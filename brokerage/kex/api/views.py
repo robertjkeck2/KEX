@@ -29,7 +29,7 @@ from kex.api.serializers import UserSerializer
 
 
 SYMBOL = "KEQ"
-exchange_uri = 'http://localhost:5000'
+exchange_uri = 'exchange'
 new_endpoint = '/v1/order/new'
 status_endpoint = '/v1/order/status'
 edit_endpoint = '/v1/order/edit'
